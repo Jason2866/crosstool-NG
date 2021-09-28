@@ -1,3 +1,4 @@
-[submodule "xtensa-overlays"]
+[submodule "overlays"]
 	path = overlays
-	url = ../xtensa-overlays.git
+	url = https://github.com/espressif/xtensa-overlays.git
+	branch = master
