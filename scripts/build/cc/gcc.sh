@@ -14,8 +14,8 @@ do_cc_get() {
     # GCC source tree, which will not be there unless we get it and
     # put it there ourselves
     if [ "${CT_CC_LANG_JAVA_USE_ECJ}" = "y" ]; then
-        if ! CT_GetFile package=ecj basename=ecj-latest extensions=.jar \
-                mirrors=$(CT_Mirrors sourceware java); then
+        if ! CT_GetFile package=ecj basename=ecj-latest extensions=.jar dir_name=gcc \
+                mirrors="$(CT_Mirrors sourceware java)"; then
             # Should be a package, too - but with Java retirement in GCC,
             # it may not make sense.
             CT_Abort "Failed to download ecj-latest.jar"
@@ -30,10 +30,6 @@ do_cc_extract() {
     # Copy ecj-latest.jar to ecj.jar at the top of the GCC source tree
     if [ "${CT_CC_LANG_JAVA_USE_ECJ}" = "y" -a ! -f "${CT_SRC_DIR}/gcc/ecj.jar" ]; then
         CT_DoExecLog ALL cp -v "${CT_TARBALLS_DIR}/ecj-latest.jar" "${CT_SRC_DIR}/gcc/ecj.jar"
-    fi
-
-    if [ -n "${CT_ARCH_XTENSA_CUSTOM_NAME}" ]; then
-        CT_ConfigureXtensa "gcc" "${CT_CC_VERSION}"
     fi
 }
 
@@ -162,29 +158,31 @@ cc_gcc_multilib_housekeeping() {
 
     CT_IterateMultilibs evaluate_multilib_cflags evaluate_cflags
 
-    # Filtering out some of the options provided in CT-NG config. Then *prepend*
-    # them to CT_TARGET_CFLAGS, like scripts/crosstool-NG.sh does. Zero out
-    # the stashed MULTILIB flags so that we don't process them again in the passes
-    # that follow.
-    CT_DoLog DEBUG "Configured target CFLAGS: '${CT_ARCH_TARGET_CFLAGS_MULTILIB}'"
-    ml_unknown= # Pass through anything we don't know about
-    for f in ${CT_ARCH_TARGET_CFLAGS_MULTILIB}; do
-        eval ml=\$ml_`cc_gcc_classify_opt ${f}`
-        if [ "${ml}" != "seen" ]; then
-            new_cflags="${new_cflags} ${f}"
-        fi
-    done
-    CT_DoLog DEBUG "Filtered target CFLAGS: '${new_cflags}'"
-    CT_EnvModify CT_TARGET_CFLAGS "${new_cflags} ${CT_TARGET_CFLAGS}"
-    CT_EnvModify CT_ARCH_TARGET_CFLAGS_MULTILIB ""
+    if [ -n "${CT_MULTILIB}" ]; then
+        # Filtering out some of the options provided in CT-NG config. Then *prepend*
+        # them to CT_TARGET_CFLAGS, like scripts/crosstool-NG.sh does. Zero out
+        # the stashed MULTILIB flags so that we don't process them again in the passes
+        # that follow.
+        CT_DoLog DEBUG "Configured target CFLAGS: '${CT_ARCH_TARGET_CFLAGS_MULTILIB}'"
+        ml_unknown= # Pass through anything we don't know about
+        for f in ${CT_ARCH_TARGET_CFLAGS_MULTILIB}; do
+            eval ml=\$ml_`cc_gcc_classify_opt ${f}`
+            if [ "${ml}" != "seen" ]; then
+                new_cflags="${new_cflags} ${f}"
+            fi
+        done
+        CT_DoLog DEBUG "Filtered target CFLAGS: '${new_cflags}'"
+        CT_EnvModify CT_ALL_TARGET_CFLAGS "${new_cflags} ${CT_TARGET_CFLAGS}"
+        CT_EnvModify CT_ARCH_TARGET_CFLAGS_MULTILIB ""
 
-    # Currently, the only LDFLAGS are endianness-related
-    CT_DoLog DEBUG "Configured target LDFLAGS: '${CT_ARCH_TARGET_LDFLAGS_MULTILIB}'"
-    if [ "${ml_endian}" != "seen" ]; then
-        CT_EnvModify CT_TARGET_LDFLAGS "${CT_ARCH_TARGET_LDFLAGS_MULTILIB} ${CT_TARGET_LDFLAGS}"
-        CT_EnvModify CT_ARCH_TARGET_LDFLAGS_MULTILIB ""
+        # Currently, the only LDFLAGS are endianness-related
+        CT_DoLog DEBUG "Configured target LDFLAGS: '${CT_ARCH_TARGET_LDFLAGS_MULTILIB}'"
+        if [ "${ml_endian}" != "seen" ]; then
+            CT_EnvModify CT_ALL_TARGET_LDFLAGS "${CT_ARCH_TARGET_LDFLAGS_MULTILIB} ${CT_TARGET_LDFLAGS}"
+            CT_EnvModify CT_ARCH_TARGET_LDFLAGS_MULTILIB ""
+        fi
+        CT_DoLog DEBUG "Filtered target LDFLAGS: '${CT_ARCH_TARGET_LDFLAGS_MULTILIB}'"
     fi
-    CT_DoLog DEBUG "Filtered target LDFLAGS: '${CT_ARCH_TARGET_LDFLAGS_MULTILIB}'"
 }
 
 #------------------------------------------------------------------------------
@@ -295,8 +293,7 @@ do_gcc_core_backend() {
     local prefix
     local complibs
     local lang_list
-    local cflags
-    local cflags_for_build
+    local cflags cflags_for_build cflags_for_target
     local ldflags
     local build_step
     local log_txt
@@ -354,13 +351,7 @@ do_gcc_core_backend() {
             ;;
     esac
 
-    case "${build_step}" in
-        core2|gcc_build)
-            CT_DoLog DEBUG "Copying headers to install area of core C compiler"
-            CT_DoExecLog ALL cp -a "${CT_HEADERS_DIR}" "${prefix}/${CT_TARGET}/include"
-    esac
-
-    for tmp in ARCH ABI CPU TUNE FPU FLOAT ENDIAN; do
+    for tmp in ARCH ABI CPU CPU_32 CPU_64 TUNE FPU FLOAT ENDIAN; do
         eval tmp="\${CT_ARCH_WITH_${tmp}}"
         if [ -n "${tmp}" ]; then
             extra_config+=("${tmp}")
@@ -471,7 +462,11 @@ do_gcc_core_backend() {
         local glibc_version
 
         CT_GetPkgVersion GLIBC glibc_version
-        glibc_version=`echo "${glibc_version}" | sed 's/\([1-9][0-9]*\.[1-9][0-9]*\).*/\1/'`
+        case "${glibc_version}" in
+        new) glibc_version=99.99;;
+        old) glibc_version=1.0;;
+        *) glibc_version=`echo "${glibc_version}" | sed 's/\([1-9][0-9]*\.[1-9][0-9]*\).*/\1/'`;;
+        esac
         extra_config+=("--with-glibc-version=${glibc_version}")
     fi
 
@@ -547,24 +542,43 @@ do_gcc_core_backend() {
 
     CT_DoLog DEBUG "Extra config passed: '${extra_config[*]}'"
 
-    # We may need to modify host/build CFLAGS separately below
+    # We may need to modify host/build/target CFLAGS separately below. Note
+    # that ${cflags} may refer either to build or host CFLAGS; they are provided
+    # by the caller.
     cflags_for_build="${CT_CFLAGS_FOR_BUILD}"
+    cflags_for_target="${CT_TARGET_CFLAGS}"
 
     # Clang's default bracket-depth is 256, and building GCC
     # requires somewhere between 257 and 512.
     if [ "${host}" = "${CT_BUILD}" ]; then
         if ${CT_BUILD}-gcc --version 2>&1 | grep clang; then
-            cflags="$cflags "-fbracket-depth=512
-            cflags_for_build="$cflags_for_build "-fbracket-depth=512
+            cflags="$cflags -fbracket-depth=512"
+            cflags_for_build="$cflags_for_build -fbracket-depth=512"
         fi
     else
         # FIXME we currently don't support clang as host compiler, only as build
         if ${CT_BUILD}-gcc --version 2>&1 | grep clang; then
-            cflags_for_build="$cflags_for_build "-fbracket-depth=512
+            cflags_for_build="$cflags_for_build -fbracket-depth=512"
         fi
     fi
 
-    # Use --with-local-prefix so older gccs don't look in /usr/local (http://gcc.gnu.org/PR10532)
+    # For non-sysrooted toolchain, GCC doesn't search except at the installation
+    # prefix; in core-1/2 stage we use a temporary installation prefix - but
+    # we may have installed something into the final prefix. This is less than ideal:
+    # in the installation prefix GCC also handles subdirectories for multilibs
+    # (e.g. first trying ${prefix}/include/${arch-triplet}) but
+    # we can only pass the top level directory, so non-sysrooted build with libc
+    # selection that doesn't merge the headers (i.e. musl, uClibc-ng) may not
+    # work. Better suggestions welcome.
+    if [ "${CT_USE_SYSROOT}" != "y" ]; then
+        cflags_for_target="${cflags_for_target} -idirafter ${CT_HEADERS_DIR}"
+    fi
+
+    # Use --with-local-prefix so older gccs don't look in /usr/local (http://gcc.gnu.org/PR10532).
+    # Pass only user-specified CFLAGS/LDFLAGS in CFLAGS_FOR_TARGET/LDFLAGS_FOR_TARGET: during
+    # the build of, for example, libatomic, GCC tried to compile multiple variants for runtime
+    # selection and passing architecture/CPU selectors, as detemined by crosstool-NG, may
+    # miscompile or outright fail.
     CT_DoExecLog CFG                                   \
     CC_FOR_BUILD="${CT_BUILD}-gcc"                     \
     CFLAGS="${cflags}"                                 \
@@ -572,8 +586,8 @@ do_gcc_core_backend() {
     CXXFLAGS="${cflags}"                               \
     CXXFLAGS_FOR_BUILD="${cflags_for_build}"           \
     LDFLAGS="${core_LDFLAGS[*]}"                       \
-    CFLAGS_FOR_TARGET="${CT_TARGET_CFLAGS}"            \
-    CXXFLAGS_FOR_TARGET="${CT_TARGET_CFLAGS}"          \
+    CFLAGS_FOR_TARGET="${cflags_for_target}"           \
+    CXXFLAGS_FOR_TARGET="${cflags_for_target}"         \
     LDFLAGS_FOR_TARGET="${CT_TARGET_LDFLAGS}"          \
     ${CONFIG_SHELL}                                    \
     "${CT_SRC_DIR}/gcc/configure"                      \
@@ -604,23 +618,23 @@ do_gcc_core_backend() {
         # Next we have to configure gcc, create libgcc.mk then edit it...
         # So much easier if we just edit the source tree, but hey...
         if [ ! -f "${CT_SRC_DIR}/gcc/gcc/BASE-VER" ]; then
-            CT_DoExecLog CFG make ${JOBSFLAGS} configure-libiberty
-            CT_DoExecLog ALL make ${JOBSFLAGS} -C libiberty libiberty.a
-            CT_DoExecLog CFG make ${JOBSFLAGS} configure-gcc configure-libcpp
-            CT_DoExecLog ALL make ${JOBSFLAGS} all-libcpp
+            CT_DoExecLog CFG make ${CT_JOBSFLAGS} configure-libiberty
+            CT_DoExecLog ALL make ${CT_JOBSFLAGS} -C libiberty libiberty.a
+            CT_DoExecLog CFG make ${CT_JOBSFLAGS} configure-gcc configure-libcpp
+            CT_DoExecLog ALL make ${CT_JOBSFLAGS} all-libcpp
         else
-            CT_DoExecLog CFG make ${JOBSFLAGS} configure-gcc configure-libcpp configure-build-libiberty
-            CT_DoExecLog ALL make ${JOBSFLAGS} all-libcpp all-build-libiberty
+            CT_DoExecLog CFG make ${CT_JOBSFLAGS} configure-gcc configure-libcpp configure-build-libiberty
+            CT_DoExecLog ALL make ${CT_JOBSFLAGS} all-libcpp all-build-libiberty
         fi
         # HACK: gcc-4.2 uses libdecnumber to build libgcc.mk, so build it here.
         if [ -d "${CT_SRC_DIR}/gcc/libdecnumber" ]; then
-            CT_DoExecLog CFG make ${JOBSFLAGS} configure-libdecnumber
-            CT_DoExecLog ALL make ${JOBSFLAGS} -C libdecnumber libdecnumber.a
+            CT_DoExecLog CFG make ${CT_JOBSFLAGS} configure-libdecnumber
+            CT_DoExecLog ALL make ${CT_JOBSFLAGS} -C libdecnumber libdecnumber.a
         fi
         # HACK: gcc-4.8 uses libbacktrace to make libgcc.mvars, so make it here.
         if [ -d "${CT_SRC_DIR}/gcc/libbacktrace" ]; then
-            CT_DoExecLog CFG make ${JOBSFLAGS} configure-libbacktrace
-            CT_DoExecLog ALL make ${JOBSFLAGS} -C libbacktrace
+            CT_DoExecLog CFG make ${CT_JOBSFLAGS} configure-libbacktrace
+            CT_DoExecLog ALL make ${CT_JOBSFLAGS} -C libbacktrace
         fi
 
         libgcc_rule="libgcc.mvars"
@@ -638,7 +652,7 @@ do_gcc_core_backend() {
             repair_cc=""
         fi
 
-        CT_DoExecLog ALL make ${JOBSFLAGS} -C gcc ${libgcc_rule} \
+        CT_DoExecLog ALL make ${CT_JOBSFLAGS} -C gcc ${libgcc_rule} \
                               ${repair_cc}
         sed -r -i -e 's@-lc@@g' gcc/${libgcc_rule}
     else # build_libgcc
@@ -667,9 +681,9 @@ do_gcc_core_backend() {
     esac
 
     CT_DoLog EXTRA "Building ${log_txt}"
-    CT_DoExecLog ALL make ${JOBSFLAGS} ${core_targets_all}
+    CT_DoExecLog ALL make ${CT_JOBSFLAGS} ${core_targets_all}
 
-    # Do not pass ${JOBSFLAGS} here: recent GCC builds have been failing
+    # Do not pass ${CT_JOBSFLAGS} here: recent GCC builds have been failing
     # in parallel 'make install' at random locations: libitm, libcilk,
     # always for the files that are installed more than once to the same
     # location (such as libitm.info).
@@ -707,6 +721,13 @@ do_gcc_core_backend() {
 
     cc_gcc_multilib_housekeeping cc="${prefix}/bin/${CT_TARGET}-${CT_CC}" \
         host="${host}"
+
+    # If binutils want the LTO plugin, point them to it
+    if [ -d "${CT_PREFIX_DIR}/lib/bfd-plugins" -a "${build_step}" = "gcc_host" ]; then
+        local gcc_version=$(cat "${CT_SRC_DIR}/gcc/gcc/BASE-VER" )
+        CT_DoExecLog ALL ln -sfv "../../libexec/gcc/${CT_TARGET}/${gcc_version}/liblto_plugin.so" \
+                "${CT_PREFIX_DIR}/lib/bfd-plugins/liblto_plugin.so"
+    fi
 }
 
 #------------------------------------------------------------------------------
@@ -752,14 +773,23 @@ do_cc_for_build() {
     CT_EndStep
 }
 
-gcc_movelibs() {
+gcc_movelibs()
+{
     local multi_flags multi_dir multi_os_dir multi_os_dir_gcc multi_root multi_index multi_count
-    local gcc_dir dst_dir
+    local gcc_dir dst_dir canon_root canon_prefix
     local rel
 
     for arg in "$@"; do
         eval "${arg// /\\ }"
     done
+
+    # GCC prints the sysroot in canonicalized form, which may be different if there
+    # is a symlink in the path. Since we need textual match to obtain a relative
+    # subdirectory path, canonicalize the prefix directory. Since GCC's behavior
+    # is not documented and hence may change at any time, canonicalize it too just
+    # for the good measure.
+    canon_root=$( cd "${multi_root}" && pwd -P )
+    canon_prefix=$( cd "${CT_PREFIX_DIR}" && pwd -P )
 
     # Move only files, directories are for other multilibs. We're looking inside
     # GCC's directory structure, thus use unmangled multi_os_dir that GCC reports.
@@ -771,9 +801,9 @@ gcc_movelibs() {
     # Depending on the selected libc, we may or may not have the ${multi_os_dir_gcc}
     # created by libc installation. If we do, use it. If we don't, use ${multi_os_dir}
     # to avoid creating an otherwise empty directory.
-    dst_dir="${multi_root}/lib/${multi_os_dir_gcc}"
+    dst_dir="${canon_root}/lib/${multi_os_dir_gcc}"
     if [ ! -d "${dst_dir}" ]; then
-        dst_dir="${multi_root}/lib/${multi_os_dir}"
+        dst_dir="${canon_root}/lib/${multi_os_dir}"
     fi
     CT_SanitizeVarDir dst_dir gcc_dir
     rel=$( echo "${gcc_dir#${CT_PREFIX_DIR}/}" | sed 's#[^/]\{1,\}#..#g' )
@@ -789,7 +819,7 @@ gcc_movelibs() {
         if [ -f "${gcc_dir}/${f}" ]; then
             CT_DoExecLog ALL mkdir -p "${dst_dir}"
             CT_DoExecLog ALL mv "${gcc_dir}/${f}" "${dst_dir}/${f}"
-            CT_DoExecLog ALL ln -sf "${rel}/${dst_dir#${CT_PREFIX_DIR}/}/${f}" "${gcc_dir}/${f}"
+            CT_DoExecLog ALL ln -sf "${rel}/${dst_dir#${canon_prefix}/}/${f}" "${gcc_dir}/${f}"
         fi
     done
 }
@@ -875,7 +905,7 @@ do_gcc_backend() {
     # Enable selected languages
     extra_config+=("--enable-languages=${lang_list}")
 
-    for tmp in ARCH ABI CPU TUNE FPU FLOAT; do
+    for tmp in ARCH ARCH_32 ARCH_64 ABI CPU CPU_32 CPU_64 TUNE TUNE_32 TUNE_64 FPU FLOAT; do
         eval tmp="\${CT_ARCH_WITH_${tmp}}"
         if [ -n "${tmp}" ]; then
             extra_config+=("${tmp}")
@@ -1113,6 +1143,8 @@ do_gcc_backend() {
         fi
     fi
 
+    # NB: not using CT_ALL_TARGET_CFLAGS/CT_ALL_TARGET_LDFLAGS here!
+    # See do_gcc_core_backend for explanation.
     CT_DoExecLog CFG                                   \
     CC_FOR_BUILD="${CT_BUILD}-gcc"                     \
     CFLAGS="${cflags}"                                 \
@@ -1137,11 +1169,11 @@ do_gcc_backend() {
 
     if [ "${CT_CANADIAN}" = "y" ]; then
         CT_DoLog EXTRA "Building libiberty"
-        CT_DoExecLog ALL make ${JOBSFLAGS} all-build-libiberty
+        CT_DoExecLog ALL make ${CT_JOBSFLAGS} all-build-libiberty
     fi
 
     CT_DoLog EXTRA "Building final gcc compiler"
-    CT_DoExecLog ALL make ${JOBSFLAGS} all
+    CT_DoExecLog ALL make ${CT_JOBSFLAGS} all
 
     # See the note on issues with parallel 'make install' in GCC above.
     CT_DoLog EXTRA "Installing final gcc compiler"
@@ -1178,4 +1210,11 @@ do_gcc_backend() {
 
     cc_gcc_multilib_housekeeping cc="${prefix}/bin/${CT_TARGET}-${CT_CC}" \
         host="${host}"
+
+    # If binutils want the LTO plugin, point them to it
+    if [ -d "${CT_PREFIX_DIR}/lib/bfd-plugins" -a "${build_step}" = "gcc_host" ]; then
+        local gcc_version=$(cat "${CT_SRC_DIR}/gcc/gcc/BASE-VER" )
+        CT_DoExecLog ALL ln -sfv "../../libexec/gcc/${CT_TARGET}/${gcc_version}/liblto_plugin.so" \
+                "${CT_PREFIX_DIR}/lib/bfd-plugins/liblto_plugin.so"
+    fi
 }
