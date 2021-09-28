@@ -17,7 +17,7 @@ Follow espressif's instructions to set up a case sensitive disk image on which t
 Clone my repo and checkout the proper branch:
 
 ```
-git clone https://github.com/SeanMollet/crosstool-NG
+git clone https://github.com/Jason2866/crosstool-NG
 cd crosstool-NG
 git checkout esp-2020r3-aarch64
 ```
