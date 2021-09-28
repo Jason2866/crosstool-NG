@@ -5,15 +5,8 @@
 # Edited by Martin Lund <mgl@doredevelopment.dk>
 #
 
-do_libc_get() {
-    CT_Fetch NEWLIB
-}
-
-do_libc_extract() {
-    CT_ExtractPatch NEWLIB
-}
-
-do_libc_start_files() {
+newlib_start_files()
+{
     CT_DoStep INFO "Installing C library headers & start files"
     CT_DoExecLog ALL cp -a "${CT_SRC_DIR}/newlib/newlib/libc/include/." \
     "${CT_HEADERS_DIR}"
@@ -25,8 +18,8 @@ do_libc_start_files() {
     CT_EndStep
 }
 
-do_libc() {
-
+newlib_main()
+{
     # It is important to build a auxiliary library before a main one
     # because the auxiliary library creates and replace the libc.a (which it is renamed to different name later)
     if [ "${CT_LIBC_NEWLIB_AUX_BUILD}" = "y" ]; then
@@ -38,8 +31,7 @@ do_libc() {
 
     CT_DoStep INFO "Installing C library"
 
-    mkdir -p "${CT_BUILD_DIR}/build-libc"
-    cd "${CT_BUILD_DIR}/build-libc"
+    CT_mkdir_pushd "${CT_BUILD_DIR}/build-libc"
 
     CT_DoLog EXTRA "Configuring C library"
 
@@ -69,7 +61,7 @@ do_libc() {
     yn_args="IO_POS_ARGS:newlib-io-pos-args
 IO_C99FMT:newlib-io-c99-formats
 IO_LL:newlib-io-long-long
-NEWLIB_REGISTER_FINI:newlib-register-fini
+REGISTER_FINI:newlib-register-fini
 NANO_MALLOC:newlib-nano-malloc
 NANO_FORMATTED_IO:newlib-nano-formatted-io
 ATEXIT_DYNAMIC_ALLOC:newlib-atexit-dynamic-alloc
@@ -77,7 +69,10 @@ GLOBAL_ATEXIT:newlib-global-atexit
 LITE_EXIT:lite-exit
 REENT_SMALL:newlib-reent-small
 MULTITHREAD:newlib-multithread
+RETARGETABLE_LOCKING:newlib-retargetable-locking
 WIDE_ORIENT:newlib-wide-orient
+FSEEK_OPTIMIZATION:newlib-fseek-optimization
+FVWRITE_IN_STREAMIO:newlib-fvwrite-in-streamio
 UNBUF_STREAM_OPT:newlib-unbuf-stream-opt
 ENABLE_TARGET_OPTSPACE:target-optspace
     "
@@ -101,7 +96,7 @@ ENABLE_TARGET_OPTSPACE:target-optspace
     [ "${CT_LIBC_NEWLIB_LTO}" = "y" ] && \
         CT_LIBC_NEWLIB_TARGET_CFLAGS="${CT_LIBC_NEWLIB_TARGET_CFLAGS} -flto"
 
-    cflags_for_target="${CT_TARGET_CFLAGS} ${CT_LIBC_NEWLIB_TARGET_CFLAGS}"
+    cflags_for_target="${CT_ALL_TARGET_CFLAGS} ${CT_LIBC_NEWLIB_TARGET_CFLAGS}"
 
     # Note: newlib handles the build/host/target a little bit differently
     # than one would expect:
@@ -122,7 +117,7 @@ ENABLE_TARGET_OPTSPACE:target-optspace
         "${CT_LIBC_NEWLIB_EXTRA_CONFIG_ARRAY[@]}"
 
     CT_DoLog EXTRA "Building C library"
-    CT_DoExecLog ALL make ${JOBSFLAGS}
+    CT_DoExecLog ALL make ${CT_JOBSFLAGS}
 
     CT_DoLog EXTRA "Installing C library"
     CT_DoExecLog ALL make install
@@ -142,11 +137,8 @@ ENABLE_TARGET_OPTSPACE:target-optspace
                                 "${CT_PREFIX_DIR}/share/doc/newlib"
     fi
 
+    CT_Popd
     CT_EndStep
-}
-
-do_libc_post_cc() {
-    :
 }
 
 newlib_AUX_BUILD() {
