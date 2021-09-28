@@ -19,7 +19,7 @@ Clone my repo and checkout the proper branch:
 ```
 git clone https://github.com/Jason2866/crosstool-NG
 cd crosstool-NG
-git checkout esp-2020r3-aarch64
+git checkout esp-2021r1-aarch64
 ```
 
 Clone the submodule:
