@@ -3,11 +3,9 @@
 
 AC_PREREQ([2.67])
 
-# FIXME Temporary hack until the next release (we'll switch to plain numeric tags then)
-# FIXME need to quote sed expression
 AC_INIT(
     [crosstool-NG],
-    [m4_esyscmd_s([git describe --always --dirty --abbrev=7 | sed s,^crosstool-ng-,,])],
+    [m4_esyscmd_s([maintainer/git-version-gen .tarball-version])],
     [crossgcc@sourceware.org],
     [crosstool-ng],
     [http://crosstool-ng.org])
@@ -99,6 +97,9 @@ AC_PROG_YACC
 AS_IF([test -z "$CC" -o -z "$CXX"],
       [AC_MSG_ERROR([no suitable compiler found])])
 
+AX_CXX_COMPILE_STDCXX([11],, [optional])
+CTNG_SET_KCONFIG_OPTION([has_cxx11], [${HAVE_CXX11}])
+
 # Check to see if the compiler can link statically
 AC_MSG_CHECKING([if $CC can static link])
 echo "int main() {}" | ${CC} -static -o /dev/null -xc - > /dev/null 2>&1
@@ -116,7 +117,6 @@ CTNG_PATH_TOOL_REQ([OBJCOPY], [gobjcopy objcopy], [objcopy])
 CTNG_PATH_TOOL_REQ([OBJDUMP], [gobjdump objdump], [objdump])
 CTNG_PATH_TOOL_REQ([READELF], [greadelf readelf], [readelf])
 
-CTNG_CHECK_PROGS_REQ([bison], [bison])
 CTNG_CHECK_PROGS_REQ([flex], [flex])
 CTNG_CHECK_PROGS_REQ([makeinfo], [makeinfo])
 CTNG_CHECK_PROGS_REQ([cut], [cut])
@@ -130,6 +130,18 @@ CTNG_CHECK_PROGS_REQ([help2man], [help2man])
 CTNG_CHECK_PROGS_REQ([file], [file])
 CTNG_CHECK_PROGS_REQ([which], [which])
 
+# Lzip is optional; all the packages that provide tarballs in .tar.lz format
+# also provide them in some other format. All other formats are currently
+# mandatory as there is at least one package that has no fallback for each
+# of them.
+# FIXME: this configure.ac should be only used for detecting the dependencies
+# of the ct-ng framework itself; anything needed at build time should be
+# determined by crosstool-NG.sh - perhaps, through another 'configure' that
+# runs during `ct-ng build`.
+AC_CHECK_PROGS([lzip], [lzip])
+CTNG_SET_KCONFIG_OPTION([lzip])
+AC_SUBST([lzip])
+
 # Not a fatal failure even if we have neither - the tarballs may
 # be provided in a local directory.
 AC_CHECK_PROGS([wget], [wget])
@@ -139,8 +151,6 @@ AC_SUBST([wget])
 AC_CHECK_PROGS([curl], [curl])
 CTNG_SET_KCONFIG_OPTION([curl])
 AC_SUBST([curl])
-
-CTNG_PROG_STAT
 
 CTNG_CPU_COUNT
 
@@ -174,15 +184,22 @@ CTNG_PROG_VERSION_REQ_ANY([MAKE],
     [^GNU Make (3\.8[1-9]|3\.9[0-9]|[4-9]\.)],
     [make_3_81_or_newer])
 
+CTNG_PROG_VERSION_REQ_ANY([MAKE],
+    [GNU make >= 4.0],
+    [make],
+    [gmake make],
+    [^GNU Make [4-9]\.],
+    [make_4_0_or_newer])
+
 # Check other companion tools that we may or may not build.
-CTNG_PROG_VERSION_REQ_STRICT([LIBTOOL],
+CTNG_PROG_VERSION_REQ_ANY([LIBTOOL],
     [GNU libtool >= 2.4],
     [libtool],
     [glibtool libtool],
     [\(GNU libtool\) ([3-9]\.|2.[4-9]|2.[1-3][0-9])],
     [libtool_2_4_or_newer])
 
-CTNG_PROG_VERSION([LIBTOOLIZE],
+CTNG_PROG_VERSION_REQ_ANY([LIBTOOLIZE],
     [GNU libtoolize >= 2.4],
     [libtoolize],
     [glibtoolize libtoolize],
@@ -217,7 +234,31 @@ CTNG_PROG_VERSION([M4],
     [\(GNU M4\) ([2-9]\.|1\.[5-9]|1\.[1-4][0-9]|1\.4\.[2-9][0-9]|1\.4\.1[2-9])],
     [gnu_m4_1_4_12_or_newer])
 
+CTNG_PROG_VERSION([PYTHON],
+    [Python],
+    [python],
+    [python37 python3.7 python36 python3.6 python35 python3.5 python34 python3.4 python33 python3.3 python32 python3.2 python31 python3.1 python3 python27 python2.7 python26 python2.6 python2 python],
+    [^Python [23]\.],
+    [python])
+
+CTNG_PROG_VERSION([PYTHON],
+    [Python >= 3.4],
+    [python],
+    [python37 python3.7 python36 python3.6 python35 python3.5 python34 python3.4 python3 python],
+    [^Python 3\.([4-9]|[1-9][0-9]+)\.],
+    [python_3_4_or_newer])
+
+CTNG_PROG_VERSION([BISON],
+    [bison >= 2.7],
+    [bison],
+    [bison],
+    [\(GNU Bison\) (2\.[7-9]|2\.[1-9][0-9]|[3-9]\.)],
+    [bison_2_7_or_newer])
+
 AC_SUBST([kconfig_options])
+
+AC_CHECK_PROGS([dtc], [dtc])
+CTNG_SET_KCONFIG_OPTION([dtc])
 
 AC_CHECK_PROGS([cvs], [cvs])
 CTNG_SET_KCONFIG_OPTION([cvs])
@@ -301,12 +342,6 @@ AC_SUBST([DATE])
 AM_CONDITIONAL([INSTALL_USER_MANUAL], [test ! -f "${srcdir}/docs/MANUAL_ONLINE"])
 AC_MSG_CHECKING([if the manual needs to be installed])
 AM_COND_IF([INSTALL_USER_MANUAL], [AC_MSG_RESULT([yes])], [AC_MSG_RESULT([no])])
-
-# FIXME Retire? We don't want to debug a version that has been mislabeled by a user
-# Decorate the version string per user-supplied version.sh, if any
-AS_IF(
-    [test -f version.sh -a -x version.sh],
-    [PACKAGE_VERSION=$(./version.sh "${PACKAGE_VERSION}")])
 
 AC_CONFIG_FILES([
     Makefile
