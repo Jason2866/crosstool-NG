@@ -97,7 +97,7 @@ do_ncurses_for_target() {
                        prefix="${prefix}" \
                        destdir="${CT_SYSROOT_DIR}" \
                        shared="${CT_SHARED_LIBS}" \
-                       cflags="${CT_TARGET_CFLAGS}" \
+                       cflags="${CT_ALL_TARGET_CFLAGS}" \
                        "${opts[@]}"
     CT_Popd
     CT_EndStep
@@ -125,7 +125,7 @@ do_ncurses_backend() {
     for arg in "$@"; do
         case "$arg" in
             --*)
-                ncurses_opts+=("$arg")
+                ncurses_opts+=("${arg}")
                 ;;
             *)
                 eval "${arg// /\\ }"
@@ -174,7 +174,7 @@ do_ncurses_backend() {
     # it also builds ncurses anyway, and dedicated targets (install.includes and
     # install.progs) do not do well with parallel make (-jX).
     CT_DoLog EXTRA "Building ncurses"
-    CT_DoExecLog ALL make ${JOBSFLAGS}
+    CT_DoExecLog ALL make ${CT_JOBSFLAGS}
 
     # STRIPPROG is handled by our wrapper around install.
     CT_DoLog EXTRA "Installing ncurses"

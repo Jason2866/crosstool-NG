@@ -79,7 +79,7 @@ config BINUTILS_LINKER_LD_GOLD
 config BINUTILS_LINKER_GOLD_LD
     bool
     prompt "gold, ld"
-    depends on !BINUTILS_FORCE_LD_BFD_ONLY
+    depends on !BINUTILS_FORCE_LD_BFD_DEFAULT && !BINUTILS_FORCE_LD_BFD_ONLY
     depends on BINUTILS_GOLD_SUPPORT
     select BINUTILS_GOLD_INSTALLED
     select BINUTILS_LINKER_BOTH
@@ -146,6 +146,25 @@ config BINUTILS_PLUGINS
       Especially, gold can use the lto-plugin, as installed
       by gcc, to handle LTO.
 
+config BINUTILS_RELRO
+    tristate
+    prompt "Enable -z relro in ELF linker by default" if BINUTILS_2_27_or_later
+    default m
+    help
+      Setting this option forces "-z relro" by default in the ELF linker.
+      Clearing this option forces "-z norelro" by default in the ELF linker.
+      Setting this option to 'M' configures binutils with their internal
+      default for the selected architecture.
+
+config BINUTILS_DETERMINISTIC_ARCHIVES
+    bool
+    prompt "Enable deterministic archives by default" if BINUTILS_2_23_or_later
+    default y if BINUTILS_2_23_or_later
+    help
+      Setting this option will enable deterministic mode by default (-D).
+      ar and ranlib will use zero for UIDs, GIDs,
+      timestamps, and use consistent file modes for all files.
+
 config BINUTILS_EXTRA_CONFIG_ARRAY
     string
     prompt "binutils extra config"
@@ -196,7 +215,7 @@ config ELF2FLT_EXTRA_CONFIG_ARRAY
     default ""
     help
       Extra flags passed onto ./configure when configuring
-      
+
       You can enter multiple arguments here, and arguments can contain spaces
       if they are properly quoted (or escaped, but prefer quotes). Eg.:
           --with-foo="1st arg with 4 spaces" --with-bar=2nd-arg-without-space

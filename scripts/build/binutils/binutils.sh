@@ -157,6 +157,14 @@ do_binutils_backend() {
     if [ "${CT_BINUTILS_PLUGINS}" = "y" ]; then
         extra_config+=( --enable-plugins )
     fi
+    if [ "${CT_BINUTILS_RELRO}" = "y" ]; then
+        extra_config+=( --enable-relro )
+    elif [ "${CT_BINUTILS_RELRO}" != "m" ]; then
+        extra_config+=( --disable-relro )
+    fi
+    if [ "${CT_BINUTILS_DETERMINISTIC_ARCHIVES}" = "y" ]; then
+        extra_config+=( --enable-deterministic-archives )
+    fi
     if [ "${CT_BINUTILS_HAS_PKGVERSION_BUGURL}" = "y" ]; then
         [ -n "${CT_PKGVERSION}" ] && extra_config+=("--with-pkgversion=${CT_PKGVERSION}")
         [ -n "${CT_TOOLCHAIN_BUGURL}" ] && extra_config+=("--with-bugurl=${CT_TOOLCHAIN_BUGURL}")
@@ -198,14 +206,20 @@ do_binutils_backend() {
     if [ "${static_build}" = "y" ]; then
         extra_make_flags+=("LDFLAGS=${ldflags} -all-static")
         CT_DoLog EXTRA "Prepare binutils for static build"
-        CT_DoExecLog ALL make ${JOBSFLAGS} configure-host
+        CT_DoExecLog ALL make ${CT_JOBSFLAGS} configure-host
     fi
 
     CT_DoLog EXTRA "Building binutils"
-    CT_DoExecLog ALL make "${extra_make_flags[@]}" ${JOBSFLAGS}
+    CT_DoExecLog ALL make "${extra_make_flags[@]}" ${CT_JOBSFLAGS}
 
     CT_DoLog EXTRA "Installing binutils"
     CT_DoExecLog ALL make install
+
+    if [ "${CT_BINUTILS_PLUGINS}" = "y" ]; then
+        # Create a directory for plugins such as LTO (to be installed by
+        # their providers later)
+        CT_DoExecLog ALL mkdir -p "${CT_PREFIX_DIR}/lib/bfd-plugins"
+    fi
 
     if [ "${build_manuals}" = "y" ]; then
         CT_DoLog EXTRA "Building and installing the binutils manuals"
@@ -215,7 +229,7 @@ do_binutils_backend() {
         fi
         manuals_install=( "${manuals_for[@]/#/install-pdf-}" )
         manuals_install+=( "${manuals_for[@]/#/install-html-}" )
-        CT_DoExecLog ALL make ${JOBSFLAGS} pdf html
+        CT_DoExecLog ALL make ${CT_JOBSFLAGS} pdf html
         CT_DoExecLog ALL make "${manuals_install[@]}"
     fi
 
@@ -225,15 +239,16 @@ do_binutils_backend() {
         rm -f "${prefix}/bin/${CT_TARGET}-ld"
         rm -f "${prefix}/${CT_TARGET}/bin/ld"
         sed -r -e "s/@@DEFAULT_LD@@/${CT_BINUTILS_LINKER_DEFAULT}/" \
-            "${CT_LIB_DIR}/scripts/build/binutils/binutils-ld.in"      \
+            "${CT_LIB_DIR}/packages/binutils/binutils-ld.in"      \
             >"${prefix}/bin/${CT_TARGET}-ld"
-        chmod +x "${prefix}/bin/${CT_TARGET}-ld"
+        chmod a+x "${prefix}/bin/${CT_TARGET}-ld"
         cp -a "${prefix}/bin/${CT_TARGET}-ld"   \
               "${prefix}/${CT_TARGET}/bin/ld"
 
-        # If needed, force using ld.bfd during the toolchain build
-        if [ "${CT_BINUTILS_FORCE_LD_BFD}" = "y" ]; then
-            export CTNG_LD_IS=bfd
+        # If needed, force using ld.bfd during the toolchain build.
+        # Note that
+        if [ "${CT_BINUTILS_FORCE_LD_BFD_DEFAULT}" = "y" ]; then
+            CT_EnvModify export CTNG_LD_IS bfd
         fi
     fi
 }
@@ -282,7 +297,7 @@ do_elf2flt_backend() {
         "${CT_ELF2FLT_EXTRA_CONFIG_ARRAY[@]}"
 
     CT_DoLog EXTRA "Building elf2flt"
-    CT_DoExecLog ALL make ${JOBSFLAGS} CPU=${CT_ARCH}
+    CT_DoExecLog ALL make ${CT_JOBSFLAGS} CPU=${CT_ARCH}
 
     CT_DoLog EXTRA "Installing elf2flt"
     CT_DoExecLog ALL make install
@@ -341,7 +356,7 @@ do_binutils_for_target() {
             "${CT_BINUTILS_EXTRA_CONFIG_ARRAY[@]}"
 
         CT_DoLog EXTRA "Building binutils' libraries (${targets[*]}) for target"
-        CT_DoExecLog ALL make ${JOBSFLAGS} "${build_targets[@]}"
+        CT_DoExecLog ALL make ${CT_JOBSFLAGS} "${build_targets[@]}"
         CT_DoLog EXTRA "Installing binutils' libraries (${targets[*]}) for target"
         CT_DoExecLog ALL make DESTDIR="${CT_SYSROOT_DIR}" "${install_targets[@]}"
 

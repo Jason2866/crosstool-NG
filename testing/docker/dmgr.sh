@@ -3,9 +3,17 @@
 # Run from the directory containing this script
 cd `dirname $0`
 
+# Global return code (flags an error if any of the actions fail)
+global_rc=0
+
 msg()
 {
     echo "INFO  :: $*" >&2
+}
+
+warn()
+{
+    echo "WARN  :: $*" >&2
 }
 
 error()
@@ -36,13 +44,27 @@ EOF
     exit 1
 }
 
+do_cleanup()
+{
+    local d
+
+    for d in "$@"; do
+        [ -d "$d" ] || continue
+        chmod -R a+w "$d"
+        rm -rf "$d"
+    done
+}
+
 # Build a docker container, store its ID.
 action_build()
 {
     local cntr=$1
 
+    msg "Cleaning up previous runs for ${cntr}"
+    do_cleanup ${cntr}/{build,install,xtools}
     msg "Building Docker container for ${cntr}"
-    docker build --no-cache -t "ctng-${cntr}" "${cntr}"
+set -x
+    docker build --no-cache -t "ctng-${cntr}" --build-arg CTNG_GID=`id -g` --build-arg CTNG_UID=`id -u` "${cntr}"
 }
 
 # Common backend for enter/test
@@ -50,16 +72,28 @@ _dckr()
 {
     local topdir=`cd ../.. && pwd`
     local cntr=$1
+    local scmd prefix
     shift
 
-    mkdir -p build-${cntr}
-    docker run --rm -i -t \
-        -v `pwd`/common-scripts:/setup-scripts:ro \
+    mkdir -p ${cntr}/{build,install,xtools}
+    prefix="docker run --rm -i -t \
+        -v `pwd`/common-scripts:/common-scripts:ro \
         -v ${topdir}:/crosstool-ng:ro \
-        -v `pwd`/build-${cntr}:/home \
-        -v $HOME/src:/src:ro \
-        ctng-${cntr} \
-        ${SETUPCMD:-/setup-scripts/su-as-user `id -un` `id -u` `id -gn` `id -g`} "$@"
+        -v `pwd`/${cntr}/build:/home/ctng/work \
+        -v `pwd`/${cntr}/install:/opt/ctng \
+        -v `pwd`/${cntr}/xtools:/home/ctng/x-tools \
+        -v $HOME/src:/home/ctng/src:ro \
+        ctng-${cntr}"
+    if [ -n "${AS_ROOT}" ]; then
+        $prefix "$@"
+    elif [ -n "$*" ]; then
+        $prefix su -l ctng -c "$*"
+    else
+        $prefix su -l ctng
+    fi
+    if [ $? != 0 ]; then
+	global_rc=1
+    fi
 }
 
 # Run the test
@@ -69,8 +103,12 @@ action_install()
 
     # The test assumes the top directory is bootstrapped, but clean.
     msg "Setting up crosstool-NG in ${cntr}"
-    _dckr "${cntr}" /setup-scripts/ctng-install
-    _dckr "${cntr}" /setup-scripts/ctng-test-basic
+    do_cleanup ${cntr}/build
+    if ! _dckr "${cntr}" /common-scripts/ctng-install; then
+	warn "Installation failed"
+    elif !  _dckr "${cntr}" /common-scripts/ctng-test-basic; then
+	warn "Basic tests failed"
+    fi
 }
 
 # Run the test
@@ -79,18 +117,19 @@ action_sample()
     local cntr=$1
     shift
 
-    # The test assumes the top directory is bootstrapped, but clean.
     msg "Building samples in ${cntr} [$@]"
-    _dckr "${cntr}" /setup-scripts/ctng-build-sample "$@"
+    do_cleanup ${cntr}/build
+    _dckr "${cntr}" /common-scripts/ctng-build-sample "$@"
 }
 
 # Enter the container using the same user account/environment as for testing.
 action_enter()
 {
     local cntr=$1
+    shift
 
     msg "Entering ${cntr}"
-    _dckr "${cntr}"
+    _dckr "${cntr}" "$@"
 }
 
 # Enter the container using the same user account/environment as for testing.
@@ -99,7 +138,7 @@ action_root()
     local cntr=$1
 
     msg "Entering ${cntr} as root"
-    SETUPCMD=/bin/bash _dckr "${cntr}"
+    AS_ROOT=y _dckr "${cntr}" /bin/bash
 }
 
 # Clean up after test suite run
@@ -108,10 +147,16 @@ action_clean()
     local cntr=$1
 
     msg "Cleaning up after ${cntr}"
-    if [ -d build-${cntr} ]; then
-        chmod -R +w build-${cntr}
-        rm -rf build-${cntr}
-    fi
+    do_cleanup ${cntr}/build
+}
+
+# Clean up after test suite run
+action_distclean()
+{
+    local cntr=$1
+
+    msg "Dist cleaning ${cntr}"
+    do_cleanup ${cntr}/{build,install,xtools}
 }
 
 all_containers=`ls */Dockerfile | sed 's,/Dockerfile,,'`
@@ -123,9 +168,9 @@ if [ "${selected_containers}" = "all" ]; then
 fi
 
 case "${action}" in
-    build|install|sample|enter|root|clean)
+    build|install|sample|enter|root|clean|distclean)
         for c in ${selected_containers}; do
-            eval "action_${action} ${c} \"$@\""
+            eval "action_${action} ${c%/} \"$@\""
         done
         ;;
     "")
@@ -135,3 +180,7 @@ case "${action}" in
         usage "Unknown action ${action}."
         ;;
 esac
+if [ "${global_rc}" != 0 ]; then
+    error "Some of the actions failed, see warnings above"
+fi
+exit ${global_rc}

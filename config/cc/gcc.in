@@ -2,7 +2,7 @@
 
 ## select CC_SUPPORT_CXX if !LIBC_NONE
 ## select CC_SUPPORT_FORTRAN
-## select CC_SUPPORT_JAVA if !GCC_7_or_later
+## select CC_SUPPORT_JAVA if !GCC_7_or_later && OBSOLETE
 ## select CC_SUPPORT_ADA
 ## select CC_SUPPORT_OBJC
 ## select CC_SUPPORT_OBJCXX
@@ -11,8 +11,10 @@
 ## select ISL_REQUIRE_0_15_or_later if ISL_NEEDED && GCC_7_or_later
 # GCC6 requires ISL 0.14+ (it says 0.14-0.16, but accepts newer ISL as well)
 ## select ISL_REQUIRE_0_14_or_later if ISL_NEEDED && GCC_6_or_later
-# GCC5 requires ISL 0.12+ (again, it says 0.12-0.16, but also accepts newer ISL)
+# GCC5 requires ISL 0.12+ (again, it says 0.12-0.16, but also accepts newer ISL up to 0.18;
+# fails to compile with 0.19+)
 ## select ISL_REQUIRE_0_12_or_later if ISL_NEEDED && GCC_5_or_later
+## select ISL_REQUIRE_0_18_or_older if ISL_NEEDED && GCC_5_or_later && !GCC_6_or_later
 # GCC4.9 requires ISL 0.10..0.15
 # GCC4.8 requires ISL 0.10..0.14
 ## select ISL_REQUIRE_0_10_or_later if ISL_NEEDED && GCC_4_8_or_later
@@ -31,11 +33,6 @@ config CC_GCC_ENABLE_PLUGINS
     def_bool y
     depends on BINUTILS_PLUGINS
     depends on ! STATIC_TOOLCHAIN
-
-# Affects the build of musl
-config GCC_BUG_61144
-    bool
-    default y if GCC_4_9_or_later && !GCC_4_9_2_or_later
 
 # If binutils installs gold, enable support for gold in gcc
 config CC_GCC_GOLD
@@ -177,6 +174,7 @@ config CC_GCC_USE_LTO
     bool "Enable LTO"
     default y
     depends on ! STATIC_TOOLCHAIN
+    select ZLIB_NEEDED
     help
       Enable the Link Time Optimisations.
 

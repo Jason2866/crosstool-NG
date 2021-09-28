@@ -32,6 +32,8 @@ if [ -z "${CT_ALLOW_BUILD_AS_ROOT_SURE}" ]; then
     fi
 fi
 
+CT_TestAndAbort "Invalid configuration. Run 'ct-ng menuconfig' and check which options select INVALID_CONFIGURATION." -n "${CT_INVALID_CONFIGURATION}"
+
 # If we want an interactive debug-shell, we must ensure these FDs
 # are indeed connected to a terminal (and not redirected in any way).
 if [ "${CT_DEBUG_INTERACTIVE}" = "y" -a ! \( -t 0 -a -t 6 -a -t 2 \) ]; then
@@ -74,6 +76,7 @@ for d in            \
     LOCAL_TARBALLS  \
     WORK            \
     PREFIX          \
+    BUILD_TOP       \
     INSTALL         \
     ; do
         eval dir="\${CT_${d}_DIR}"
@@ -88,11 +91,29 @@ for d in            \
                 CT_Abort "'CT_${d}_DIR'='${dir}' contains a comma in it.\nDon't use commas in paths, it breaks things."
                 ;;
         esac
+        case "${dir}" in
+            /*)
+                # Absolute path, okay
+                ;;
+            *)
+                # Relative path from CT_TOP_DIR, make absolute
+                eval CT_${d}_DIR="${CT_TOP_DIR}/${dir}"
+                # Having .. inside CT_PREFIX breaks relocatability.
+                CT_SanitizeVarDir CT_${d}_DIR
+                ;;
+        esac
 done
+
+n_open_files=$(ulimit -n)
+if [ "${n_open_files}" -lt 2048 ]; then
+    # Newer ld seems to keep a lot of open file descriptors, hitting the default limit
+    # (1024) for example during uClibc-ng link.
+    CT_DoLog WARN "Number of open files ${n_open_files} may not be sufficient to build the toolchain; increasing to 2048"
+    ulimit -n 2048
+fi
 
 # Where will we work?
 CT_WORK_DIR="${CT_WORK_DIR:-${CT_TOP_DIR}/.build}"
-CT_BUILD_DIR="${CT_BUILD_TOP_DIR}/build"
 CT_DoExecLog ALL mkdir -p "${CT_WORK_DIR}"
 CT_DoExecLog DEBUG rm -f "${CT_WORK_DIR}/backtrace"
 
@@ -166,8 +187,8 @@ CT_PREFIX_DIR="$( ${sed} -r -e 's:/+:/:g; s:/*$::;' <<<"${CT_PREFIX_DIR}" )"
 # Second kludge: merge user-supplied target CFLAGS with architecture-provided
 # target CFLAGS. Do the same for LDFLAGS in case it happens in the future.
 # Put user-supplied flags at the end, so that they take precedence.
-CT_TARGET_CFLAGS="${CT_ARCH_TARGET_CFLAGS} ${CT_TARGET_CFLAGS}"
-CT_TARGET_LDFLAGS="${CT_ARCH_TARGET_LDFLAGS} ${CT_TARGET_LDFLAGS}"
+CT_ALL_TARGET_CFLAGS="${CT_ARCH_TARGET_CFLAGS} ${CT_TARGET_CFLAGS}"
+CT_ALL_TARGET_LDFLAGS="${CT_ARCH_TARGET_LDFLAGS} ${CT_TARGET_LDFLAGS}"
 
 # FIXME move to gcc.sh
 CT_CC_GCC_CORE_EXTRA_CONFIG_ARRAY=( ${CT_ARCH_CC_CORE_EXTRA_CONFIG} "${CT_CC_GCC_CORE_EXTRA_CONFIG_ARRAY[@]}" )
@@ -196,7 +217,7 @@ CT_TARBALLS_DIR="${CT_WORK_DIR}/tarballs"
 CT_COMMON_SRC_DIR="${CT_WORK_DIR}/src"
 CT_SRC_DIR="${CT_BUILD_TOP_DIR}/src"
 CT_BUILDTOOLS_PREFIX_DIR="${CT_BUILD_TOP_DIR}/buildtools"
-CT_STATE_DIR="${CT_WORK_DIR}/${CT_TARGET}/state"
+CT_STATE_DIR="${CT_BUILD_TOP_DIR}/state"
 # Note about HOST_COMPLIBS_DIR: it's always gonna be in the buildtools dir, or a
 # sub-dir. So we won't have to save/restore it, not even create it.
 # In case of cross or native, host-complibs are used for build-complibs;
@@ -239,11 +260,6 @@ if [    "${CT_SAVE_TARBALLS}" = "y"     \
     CT_DoLog WARN "Directory '${CT_LOCAL_TARBALLS_DIR}' does not exist."
     CT_DoLog WARN "Will not save downloaded tarballs to local storage."
     CT_SAVE_TARBALLS=
-fi
-
-# Check now if we can write to the destination directory:
-if [ -d "${CT_PREFIX_DIR}" ]; then
-    CT_TestAndAbort "Destination directory '${CT_PREFIX_DIR}' is not removable" ! -w $(dirname "${CT_PREFIX_DIR}")
 fi
 
 # Good, now grab a bit of informations on the system we're being run on,
@@ -304,20 +320,17 @@ CT_DoExecLog ALL mkdir -p "${CT_HOST_COMPLIBS_DIR}"
 # Only create the state dir if asked for a restartable build
 [ -n "${CT_DEBUG_CT_SAVE_STEPS}" ] && CT_DoExecLog ALL mkdir -p "${CT_STATE_DIR}"
 
+# Kludge: CT_PREFIX_DIR might have grown read-only if
+# the previous build was successful.
+CT_DoExecLog ALL chmod -R u+w "${CT_PREFIX_DIR}"
+
 # Check install file system case-sensitiveness
 CT_DoExecLog DEBUG touch "${CT_PREFIX_DIR}/foo"
 CT_TestAndAbort "Your file system in '${CT_PREFIX_DIR}' is *not* case-sensitive!" -f "${CT_PREFIX_DIR}/FOO"
 CT_DoExecLog DEBUG rm -f "${CT_PREFIX_DIR}/foo"
 
-# Kludge: CT_PREFIX_DIR might have grown read-only if
-# the previous build was successful.
-CT_DoExecLog ALL chmod -R u+w "${CT_PREFIX_DIR}"
-
 # Setting up the rest of the environment only if not restarting
 if [ -z "${CT_RESTART}" ]; then
-    # Having .. inside CT_PREFIX breaks relocatability.
-    CT_SanitizeVarDir CT_PREFIX_DIR
-
     case "${CT_SYSROOT_NAME}" in
         "")     CT_SYSROOT_NAME="sysroot";;
         .)      CT_Abort "Sysroot name is set to '.' which is forbidden";;
@@ -424,7 +437,7 @@ if [ -z "${CT_RESTART}" ]; then
             t="${!r}-"
         fi
 
-        for tool in ar as dlltool gcc g++ gcj gnatbind gnatmake ld nm objcopy objdump ranlib strip windres; do
+        for tool in ar as dlltool gcc g++ gcj gnatbind gnatmake ld libtool nm objcopy objdump ranlib strip windres; do
             # First try with prefix + suffix
             # Then try with prefix only
             # Then try with suffix only, but only for BUILD, and HOST iff REAL_BUILD == REAL_HOST
@@ -446,6 +459,7 @@ if [ -z "${CT_RESTART}" ]; then
             fi
 
             # Not all tools are available for all platforms, but some are required.
+            # TBD do we need these as shell wrappers? exec is slow on Cygwin, and this makes exec twice for each compiler/linker run
             if [ -n "${where}" ]; then
                 CT_DoLog DEBUG "  '${!v}-${tool}' -> '${where}'"
                 printf "#${BANG}${CT_CONFIG_SHELL}\nexec '${where}' \"\${@}\"\n" >"${CT_BUILDTOOLS_PREFIX_DIR}/bin/${!v}-${tool}"
@@ -456,7 +470,7 @@ if [ -z "${CT_RESTART}" ]; then
                     ar|as|gcc|ld|nm|objcopy|objdump|ranlib)
                         CT_Abort "Missing: '${t}${tool}${!s}' or '${t}${tool}' or '${tool}' : either needed!"
                         ;;
-                    # Some are conditionnally required
+                    # Some are conditionally required
                     # Add them in alphabetical (C locale) ordering
                     g++)
                         # g++ (needed for companion lib), only needed for HOST
@@ -519,6 +533,9 @@ if [ -z "${CT_RESTART}" ]; then
     CT_LDFLAGS_FOR_BUILD="-L${CT_BUILDTOOLS_PREFIX_DIR}/lib"
     CT_LDFLAGS_FOR_BUILD+=" ${CT_EXTRA_LDFLAGS_FOR_BUILD}"
 
+    if ${CT_BUILD}-gcc --version 2>&1 | grep clang; then
+        CT_CFLAGS_FOR_BUILD+=" -Qunused-arguments"
+    fi
     case "${CT_BUILD}" in
         *darwin*)
             # Two issues while building on MacOS. Really, we should be checking for
@@ -546,6 +563,9 @@ if [ -z "${CT_RESTART}" ]; then
     CT_CFLAGS_FOR_HOST+=" ${CT_EXTRA_CFLAGS_FOR_HOST}"
     CT_LDFLAGS_FOR_HOST="-L${CT_HOST_COMPLIBS_DIR}/lib"
     CT_LDFLAGS_FOR_HOST+=" ${CT_EXTRA_LDFLAGS_FOR_HOST}"
+    if ${CT_HOST}-gcc --version 2>&1 | grep clang; then
+        CT_CFLAGS_FOR_HOST+=" -Qunused-arguments"
+    fi
     case "${CT_HOST}" in
         *darwin*)
             # Same as above, for host
@@ -557,7 +577,7 @@ if [ -z "${CT_RESTART}" ]; then
     CT_DoLog DEBUG "LDFLAGS for host compiler: '${CT_LDFLAGS_FOR_HOST}'"
 
     # And help make go faster
-    JOBSFLAGS=
+    CT_JOBSFLAGS=
     # Override the configured jobs with what's been given on the command line
     if [ -n "${CT_JOBS}" ]; then
         if [ ! -z "`echo "${CT_JOBS}" | ${sed} 's/[0-9]//g'`" ]; then
@@ -568,9 +588,9 @@ if [ -z "${CT_RESTART}" ]; then
     # Use the number of processors+1 when automatically setting the number of
     # parallel jobs.
     AUTO_JOBS=$[ BUILD_NCPUS + 1 ]
-    [ ${CT_PARALLEL_JOBS} -eq 0 ] && JOBSFLAGS="${JOBSFLAGS} -j${AUTO_JOBS}"
-    [ ${CT_PARALLEL_JOBS} -gt 0 ] && JOBSFLAGS="${JOBSFLAGS} -j${CT_PARALLEL_JOBS}"
-    JOBSFLAGS="${JOBSFLAGS} -l${CT_LOAD}"
+    [ ${CT_PARALLEL_JOBS} -eq 0 ] && CT_JOBSFLAGS="${CT_JOBSFLAGS} -j${AUTO_JOBS}"
+    [ ${CT_PARALLEL_JOBS} -gt 0 ] && CT_JOBSFLAGS="${CT_JOBSFLAGS} -j${CT_PARALLEL_JOBS}"
+    CT_JOBSFLAGS="${CT_JOBSFLAGS} -l${CT_LOAD}"
 
     # Override 'download only' option
     [ -n "${CT_SOURCE}" ] && CT_ONLY_DOWNLOAD=y
@@ -609,10 +629,7 @@ if [ -z "${CT_RESTART}" ]; then
     rm -f "${testc}"
 
     CT_DoLog EXTRA "Installing user-supplied crosstool-NG configuration"
-    CT_DoExecLog ALL mkdir -p "${CT_PREFIX_DIR}/bin"
-    CT_DoExecLog DEBUG ${install} -m 0755 "${CT_LIB_DIR}/scripts/toolchain-config.in" "${CT_PREFIX_DIR}/bin/${CT_TARGET}-ct-ng.config"
-    CT_DoExecLog DEBUG ${sed} -i -e 's,@@grep@@,"'"${grep}"'",;' "${CT_PREFIX_DIR}/bin/${CT_TARGET}-ct-ng.config"
-    bzip2 -c -9 .config >>"${CT_PREFIX_DIR}/bin/${CT_TARGET}-ct-ng.config"
+    CT_InstallConfigurationFile .config ct-ng
 
     CT_DoStep EXTRA "Dumping internal crosstool-NG configuration"
     CT_DoLog EXTRA "Building a toolchain for:"
@@ -660,7 +677,6 @@ if [ "${CT_ONLY_DOWNLOAD}" != "y" -a "${CT_ONLY_EXTRACT}" != "y" ]; then
     do_stop=0
     prev_step=
     [ -n "${CT_RESTART}" ] && do_it=0 || do_it=1
-    # Aha! CT_STEPS comes from steps.mk!
     for step in ${CT_STEPS}; do
         if [ ${do_it} -eq 0 ]; then
             if [ "${CT_RESTART}" = "${step}" ]; then

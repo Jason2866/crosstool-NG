@@ -6,6 +6,7 @@
 ## select ARCH_DEFAULT_32
 ## select ARCH_SUPPORTS_BOTH_MMU
 ## select ARCH_DEFAULT_HAS_MMU
+## select ARCH_SUPPORTS_FLAT_FORMAT
 ## select ARCH_SUPPORTS_EITHER_ENDIAN
 ## select ARCH_DEFAULT_LE
 ## select ARCH_SUPPORTS_WITH_ARCH
@@ -15,6 +16,7 @@
 ## select ARCH_SUPPORTS_WITH_FLOAT if ARCH_32
 ## select ARCH_SUPPORTS_WITH_FPU if ARCH_32
 ## select ARCH_SUPPORTS_SOFTFP if ARCH_32
+## select LINUX_REQUIRE_3_7_or_later if ARCH_64 && KERNEL_LINUX
 
 ## help The ARM architecture, as defined by:
 ## help     http://www.arm.com/
@@ -56,7 +58,7 @@ config ARCH_ARM_INTERWORKING
       > [not to use interwork], since slightly larger code is generated
       > when [interwork] is specified.
       
-      NOTE: Interworking in crosstool-NG is not sell-tested. Use at your
+      NOTE: Interworking in crosstool-NG is not well-tested. Use at your
             own risks, and report success and/or failure.
 
 # Until we only support EABI:

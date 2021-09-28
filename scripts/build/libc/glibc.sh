@@ -2,7 +2,8 @@
 # Copyright 2007 Yann E. MORIN
 # Licensed under the GPL v2. See COPYING in the root of this package
 
-do_libc_get() {
+glibc_get()
+{
     local date
     local version
 
@@ -13,7 +14,8 @@ do_libc_get() {
     return 0
 }
 
-do_libc_extract() {
+glibc_extract()
+{
     CT_ExtractPatch GLIBC
     if [ "${CT_GLIBC_USE_PORTS_EXTERNAL}" = "y" ]; then
         CT_ExtractPatch GLIBC_PORTS
@@ -23,34 +25,32 @@ do_libc_extract() {
         # we do not support concurrent use of the source directory
         # and next run, if using different glibc-ports source, will override
         # this symlink anyway.
-        CT_DoExecLog ALL ln -sf "${CT_GLIBC_PORTS_SRC_DIR}/${CT_GLIBC_PORTS_BASENAME}" \
-                "${CT_GLIBC_SRC_DIR}/${CT_GLIBC_BASENAME}/ports"
+        CT_DoExecLog ALL ln -sf "${CT_SRC_DIR}/${CT_GLIBC_PORTS_DIR_NAME}" \
+                "${CT_SRC_DIR}/${CT_GLIBC_DIR_NAME}/ports"
     fi
-    # TBD make the configure timestamp fix in all patched packages (e.g. part of CT_ExtractPatch)
 }
 
 # Build and install headers and start files
-do_libc_start_files() {
+glibc_start_files()
+{
     # Start files and Headers should be configured the same way as the
     # final libc, but built and installed differently.
-    do_libc_backend libc_mode=startfiles
+    glibc_backend libc_mode=startfiles
 }
 
 # This function builds and install the full C library
-do_libc() {
-    do_libc_backend libc_mode=final
-}
-
-do_libc_post_cc() {
-    :
+glibc_main()
+{
+    glibc_backend libc_mode=final
 }
 
 # This backend builds the C library once for each multilib
 # variant the compiler gives us
-# Usage: do_libc_backend param=value [...]
+# Usage: glibc_backend param=value [...]
 #   Parameter           : Definition                            : Type      : Default
 #   libc_mode           : 'startfiles' or 'final'               : string    : (none)
-do_libc_backend() {
+glibc_backend()
+{
     local libc_mode
     local arg
 
@@ -71,17 +71,18 @@ do_libc_backend() {
     esac
 
     CT_mkdir_pushd "${CT_BUILD_DIR}/build-libc-${libc_mode}"
-    CT_IterateMultilibs do_libc_backend_once multilib libc_mode="${libc_mode}"
+    CT_IterateMultilibs glibc_backend_once multilib libc_mode="${libc_mode}"
     CT_Popd
     CT_EndStep
 }
 
 # This backend builds the C library once
-# Usage: do_libc_backend_once param=value [...]
+# Usage: glibc_backend_once param=value [...]
 #   Parameter           : Definition                            : Type
 #   libc_mode           : 'startfiles' or 'final'               : string    : (empty)
 #   multi_*             : as defined in CT_IterateMultilibs     : (varies)  :
-do_libc_backend_once() {
+glibc_backend_once()
+{
     local multi_flags multi_dir multi_os_dir multi_root multi_index multi_count multi_target
     local build_cflags build_cppflags build_ldflags
     local startfiles_dir
@@ -137,7 +138,7 @@ do_libc_backend_once() {
     # values, as they CT_GLIBC_EXTRA_CONFIG_ARRAY is passed after
     # extra_config
 
-    extra_config+=("$(do_libc_min_kernel_config)")
+    extra_config+=("$(glibc_min_kernel_config)")
 
     case "${CT_THREADS}" in
         nptl)           extra_config+=("--with-__thread" "--with-tls");;
@@ -166,19 +167,28 @@ do_libc_backend_once() {
         extra_config+=("--enable-oldest-abi=${CT_GLIBC_OLDEST_ABI}")
     fi
 
-    case "$(do_libc_add_ons_list ,)" in
+    case "$(glibc_add_ons_list ,)" in
         "") extra_config+=("--enable-add-ons=no");;
-        *)  extra_config+=("--enable-add-ons=$(do_libc_add_ons_list ,)");;
+        *)  extra_config+=("--enable-add-ons=$(glibc_add_ons_list ,)");;
     esac
 
     [ "${CT_GLIBC_ENABLE_WERROR}" != "y" ] && extra_config+=("--disable-werror")
     [ -n "${CT_PKGVERSION}" ] && extra_config+=("--with-pkgversion=${CT_PKGVERSION}")
     [ -n "${CT_TOOLCHAIN_BUGURL}" ] && extra_config+=("--with-bugurl=${CT_TOOLCHAIN_BUGURL}")
 
+    if [ -n "${CT_GLIBC_SSP}" ]; then
+        extra_config+=("--enable-stack-protector=${CT_GLIBC_SSP}")
+    fi
+
     touch config.cache
 
-    # Hide host C++ binary from configure
-    echo "ac_cv_prog_ac_ct_CXX=${CT_TARGET}-g++" >>config.cache
+    # Until it became explicitly controllable with --enable-stack-protector=...,
+    # configure detected GCC support for -fstack-protector{,-strong} and
+    # tried to enable it in some parts of glibc - which then failed to build.
+    if [ -z "${CT_GLIBC_BUILD_SSP}" ]; then
+        echo "libc_cv_ssp=no" >>config.cache
+        echo "libc_cv_ssp_strong=no" >>config.cache
+    fi
 
     if [ "${CT_GLIBC_FORCE_UNWIND}" = "y" ]; then
         echo "libc_cv_forced_unwind=yes" >>config.cache
@@ -189,7 +199,7 @@ do_libc_backend_once() {
     printf "%s\n" "${CT_GLIBC_CONFIGPARMS}" > configparms
 
     # glibc can't be built without -O2 (reference needed!)
-    glibc_cflags+=" -O2"
+    glibc_cflags+=" -g -O2"
 
     case "${CT_GLIBC_ENABLE_FORTIFIED_BUILD}" in
         y)  ;;
@@ -197,7 +207,7 @@ do_libc_backend_once() {
     esac
 
     # In the order of increasing precedence. Flags common to compiler and linker.
-    glibc_cflags+=" ${CT_TARGET_CFLAGS}"
+    glibc_cflags+=" ${CT_ALL_TARGET_CFLAGS}"
     glibc_cflags+=" ${CT_GLIBC_EXTRA_CFLAGS}"
     glibc_cflags+=" ${multi_flags}"
 
@@ -242,7 +252,7 @@ do_libc_backend_once() {
     # Run explicitly through CONFIG_SHELL, or the build breaks badly (loop-of-death)
     # when the shell is not bash... Sigh... :-(
 
-    CT_DoLog DEBUG "Configuring with addons  : '$(do_libc_add_ons_list ,)'"
+    CT_DoLog DEBUG "Configuring with addons  : '$(glibc_add_ons_list ,)'"
     CT_DoLog DEBUG "Extra config args passed : '${extra_config[*]}'"
     CT_DoLog DEBUG "Extra CFLAGS passed      : '${glibc_cflags}'"
     CT_DoLog DEBUG "Placing startfiles into  : '${startfiles_dir}'"
@@ -250,9 +260,12 @@ do_libc_backend_once() {
 
     # CFLAGS are only applied when compiling .c files. .S files are compiled with ASFLAGS,
     # but they are not passed by configure. Thus, pass everything in CC instead.
+    # The CFLAGS variable needs to be cleared, else the default "-g -O2"
+    # would override previous flags.
     CT_DoExecLog CFG                                                \
     BUILD_CC=${CT_BUILD}-gcc                                        \
     CC="${CT_TARGET}-${CT_CC} ${glibc_cflags}"                      \
+    CFLAGS=""                                                       \
     AR=${CT_TARGET}-ar                                              \
     RANLIB=${CT_TARGET}-ranlib                                      \
     "${CONFIG_SHELL}"                                               \
@@ -269,6 +282,10 @@ do_libc_backend_once() {
         "${CT_GLIBC_EXTRA_CONFIG_ARRAY[@]}"
 
     # build hacks
+
+    # Mask C++ compiler. Glibc 2.29+ attempts to build some tests using gcc++, but
+    # we haven't built libstdc++ yet. Should really implement #808 after 1.24.0...
+    extra_make_args+=( CXX= )
     case "${CT_ARCH},${CT_ARCH_CPU}" in
         powerpc,8??)
             # http://sourceware.org/ml/crossgcc/2008-10/msg00068.html
@@ -307,7 +324,7 @@ do_libc_backend_once() {
 
         # use the 'install-headers' makefile target to install the
         # headers
-        CT_DoExecLog ALL make ${JOBSFLAGS}                       \
+        CT_DoExecLog ALL make ${CT_JOBSFLAGS}                       \
                          install_root=${multi_root}                 \
                          install-bootstrap-headers=yes              \
                          "${extra_make_args[@]}"                    \
@@ -357,7 +374,7 @@ do_libc_backend_once() {
             # there are a few object files needed to link shared libraries,
             # which we build and install by hand
             CT_DoExecLog ALL mkdir -p "${startfiles_dir}"
-            CT_DoExecLog ALL make ${JOBSFLAGS} \
+            CT_DoExecLog ALL make ${CT_JOBSFLAGS} \
                         "${extra_make_args[@]}" \
                         csu/subdir_lib
             CT_DoExecLog ALL cp csu/crt1.o csu/crti.o csu/crtn.o    \
@@ -378,12 +395,12 @@ do_libc_backend_once() {
 
     if [ "${libc_mode}" = "final" ]; then
         CT_DoLog EXTRA "Building C library"
-        CT_DoExecLog ALL make ${JOBSFLAGS}         \
+        CT_DoExecLog ALL make ${CT_JOBSFLAGS}         \
                               "${extra_make_args[@]}" \
                               all
 
         CT_DoLog EXTRA "Installing C library"
-        CT_DoExecLog ALL make ${JOBSFLAGS}                 \
+        CT_DoExecLog ALL make ${CT_JOBSFLAGS}                 \
                               "${extra_make_args[@]}"         \
                               install_root="${multi_root}"    \
                               install
@@ -393,7 +410,7 @@ do_libc_backend_once() {
             # last multilib target. If it's not multilib, it will happen on the
             # only target.
             CT_DoLog EXTRA "Building and installing the C library manual"
-            # Omit JOBSFLAGS as GLIBC has problems building the
+            # Omit CT_JOBSFLAGS as GLIBC has problems building the
             # manuals in parallel
             CT_DoExecLog ALL make pdf html
             CT_DoExecLog ALL mkdir -p ${CT_PREFIX_DIR}/share/doc
@@ -403,7 +420,7 @@ do_libc_backend_once() {
         fi
 
         if [ "${CT_GLIBC_LOCALES}" = "y" -a "${multi_index}" = "${multi_count}" ]; then
-            do_libc_locales
+            glibc_locales
         fi
     fi # libc_mode = final
 
@@ -411,7 +428,8 @@ do_libc_backend_once() {
 }
 
 # Build up the addons list, separated with $1
-do_libc_add_ons_list() {
+glibc_add_ons_list()
+{
     local sep="$1"
     local addons_list
 
@@ -428,7 +446,8 @@ do_libc_add_ons_list() {
 }
 
 # Compute up the minimum supported Linux kernel version
-do_libc_min_kernel_config() {
+glibc_min_kernel_config()
+{
     local min_kernel_config
 
     case "${CT_GLIBC_EXTRA_CONFIG_ARRAY[*]}" in
@@ -463,7 +482,8 @@ do_libc_min_kernel_config() {
 }
 
 # Build and install the libc locales
-do_libc_locales() {
+glibc_locales()
+{
     local src_dir="${CT_SRC_DIR}/glibc"
     local -a extra_config
     local glibc_cflags
@@ -529,7 +549,7 @@ do_libc_locales() {
         "${extra_config[@]}"
 
     CT_DoLog EXTRA "Building C library localedef"
-    CT_DoExecLog ALL make ${JOBSFLAGS}
+    CT_DoExecLog ALL make ${CT_JOBSFLAGS}
 
     # The target's endianness and uint32_t alignment should be passed as options
     # to localedef, but glibc's localedef does not support these options, which
@@ -537,7 +557,7 @@ do_libc_locales() {
     # only if it has the same endianness and uint32_t alignment as the host's.
 
     CT_DoLog EXTRA "Installing C library locales"
-    CT_DoExecLog ALL make ${JOBSFLAGS}                  \
+    CT_DoExecLog ALL make ${CT_JOBSFLAGS}                  \
                           install_root="${CT_SYSROOT_DIR}" \
                           localedata/install-locales
 }

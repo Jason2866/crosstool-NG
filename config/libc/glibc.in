@@ -23,8 +23,8 @@ endif
 
 # Glibc has some dependencies on the kernel headers:
 config GLIBC_DEP_KERNEL_HEADERS_VERSION
-	def_bool y
-	select LINUX_REQUIRE_3_2_or_later if GLIBC_2_24_or_later
+    def_bool y
+    select LINUX_REQUIRE_3_2_or_later if GLIBC_2_24_or_later
 
 # Glibc 2.26 requires at least binutils 2.25.
 # Also, binutils 2.30 fail while compiling aarch64 glibc; fixed in 2.27
@@ -35,12 +35,49 @@ config GLIBC_DEP_BINUTILS
     select BINUTILS_REQUIRE_2_25_or_later if GLIBC_2_26_or_later
     select BINUTILS_REQUIRE_older_than_2_30 if GLIBC_older_than_2_26 && ARCH_ARM && ARCH_64
 
+# Glibc 2.26 requires GCC4.9 or newer
+# Glibc 2.29 requires GCC5+ or, for ppc64le, GCC6.2+. We only support the latest
+# release on GCC6 branch, so just assume it is newer than 6.2
+# Glibc 2.30 uncondtionally requires GCC 6.2+
 config GLIBC_DEP_GCC
     def_bool y
     select GCC_REQUIRE_4_9_or_later if GLIBC_2_26_or_later
+    select GCC_REQUIRE_5_or_later if GLIBC_2_29_or_later
+    select GCC_REQUIRE_6_or_later if GLIBC_2_29_or_later && ARCH_POWERPC && ARCH_64 && ARCH_LE
+    select GCC_REQUIRE_6_or_later if GLIBC_2_30_or_later
+
+# Glibc 2.29 requires bison 2.7 or later. All versions in ct-ng satisfy that
+# version requirement.
+config GLIBC_DEP_BISON
+    def_bool y
+    depends on GLIBC_2_29_or_later && !CONFIGURE_has_bison_2_7_or_newer
+    select COMP_TOOLS_BISON
+
+# Glibc 2.29 now requires Python 3.4 or later, and make 4.0 or later. Ensure
+# we build 'make' as a companion tool if host's make isn't new enough.
+config GLIBC_DEP_PYTHON
+    def_bool y
+    select GLIBC_REQUIRE_older_than_2_29 if !CONFIGURE_has_python_3_4_or_newer
+
+config GLIBC_DEP_MAKE_4_0
+    def_bool y
+    depends on GLIBC_2_28_or_later && !CONFIGURE_has_make_4_0_or_newer
+    select COMP_TOOLS_MAKE
+    select MAKE_REQUIRE_4_0_or_later
+    select MAKE_GNUMAKE_SYMLINK # Override old host make in .build/tools/bin
+
+# Glibc 2.31 removed support for pre-v8 SPARC in 32-bit mode (64-bit mode always
+# required UltraSPARC)
+config GLIBC_SPARC_ALLOW_V7
+    def_bool y
+    depends on GLIBC_2_30_or_older
 
 config THREADS
     default "nptl"
+
+config GLIBC_BUILD_SSP
+    def_bool y
+    depends on GLIBC_2_25_or_later
 
 # Known add-ons and when they exist(ed)
 #   crypt           external in 2.1, no longer an add-on since 2.2
@@ -320,6 +357,45 @@ config GLIBC_MIN_KERNEL
     default LINUX_VERSION                 if GLIBC_KERNEL_VERSION_AS_HEADERS
     default GLIBC_MIN_KERNEL_VERSION      if GLIBC_KERNEL_VERSION_CHOSEN
 
+if GLIBC_BUILD_SSP
+choice
+    bool "Stack-smashing protection (SSP) in glibc"
+    default GLIBC_SSP_DEFAULT
+
+config GLIBC_SSP_DEFAULT
+    bool "default"
+    help
+      Glibc's configure script determines the stack protection level.
+
+config GLIBC_SSP_NO
+    bool "no"
+    help
+      Glibc functions are not protected against stack-smashing.
+
+config GLIBC_SSP_YES
+    bool "yes"
+    help
+      Glibc is compiled with -fstack-protector option.
+
+config GLIBC_SSP_ALL
+    bool "all"
+    help
+      Glibc is compiled with -fstack-protector-all option.
+
+config GLIBC_SSP_STRONG
+    bool "strong"
+    help
+      Glibc is compiled with -fstack-protector-strong option.
+
+endchoice
+
+config GLIBC_SSP
+    string
+    default "no" if GLIBC_SSP_NO
+    default "yes" if GLIBC_SSP_YES
+    default "all" if GLIBC_SSP_ALL
+    default "strong" if GLIBC_SSP_STRONG
+
 # All supported versions of glibc build cleanly with GCC7 and earlier.
 # GCC8-related fixes were only available in glibc 2.27.
 config GLIBC_ENABLE_WERROR
@@ -331,5 +407,7 @@ config GLIBC_ENABLE_WERROR
       However, older version of glibc may not build with newer versions
       of the compiler than there were available at the time of a glibc
       release (because newer compilers typically have better diagnostics).
+
+endif
 
 endif # KERNEL_LINUX

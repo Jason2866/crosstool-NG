@@ -1,9 +1,6 @@
-#!/bin/bash
+#!/bin/bash --login
+# Use --login to ensure /etc/profile is read
 
 set -e
-cd
-rm -rf bld-samples
-mkdir bld-samples
-cd bld-samples
-export PATH=$HOME/inst-ctng/bin:$PATH
+cd work
 ct-ng build-all ${1+CT_SAMPLES="$*"}
