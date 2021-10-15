@@ -176,7 +176,7 @@ newlib_AUX_BUILD() {
     CT_DoExecLog ALL make install
 
     # Rename some files to *_aux_name.* pattern
-    find ${CT_PREFIX_DIR}/${CT_TARGET}/lib -mindepth 1 -maxdepth 2 \( -name libc.a -o -name libg.a \) -print0 |
+    find ${CT_PREFIX_DIR}/${CT_TARGET}/lib \( -name libc.a -o -name libg.a \) -print0 |
         while IFS= read -r -d $'\0' name; do
             new_name=$(echo -n "${name%.*}"; echo -n "_${aux_name}."; echo "${name##*.}")
             mv -v ${name} ${new_name}
