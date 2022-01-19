@@ -1,6 +1,7 @@
 stages:
   - build
   - private_deploy
+  - pre_test
   - test
 
 image: ${CI_DOCKER_REGISTRY}/esp32-ci-env
@@ -82,10 +83,22 @@ before_script:
   # see https://stackoverflow.com/questions/33512541/cross-compiling-gdb-for-arm-with-python-failed#34625177
   echo "# CT_GDB_CROSS_PYTHON is not set" >> .config
 
+.configure_win_crossbuild: &configure_win_crossbuild |
+  # Append option
+  ( \
+    KV=$(grep "CT_CC_GCC_EXTRA_CONFIG_ARRAY" .config) \
+    && echo "${KV%\"} --with-gnu-ld\"" >> .config; \
+  )
+
 # Actual build
 .build_toolchain: &build_toolchain |
   ./ct-ng oldconfig
   ./ct-ng build
+
+.add_extra_files: &add_extra_files |
+  if [ "${EXTRA_BINS:-}" ]; then
+    cp -v ${EXTRA_BINS} builds/${CONF_TARGET}/bin/
+  fi
 
 # Package the toolchain
 .package_toolchain: &package_toolchain |
@@ -229,13 +242,16 @@ riscv32_esp_macos:
     CONF_HOST: "i686-w64-mingw32"
     ARCHIVE_TOOL: "zip -r"
     ARCHIVE_EXT: "zip"
+    EXTRA_BINS: "/usr/lib/gcc/i686-w64-mingw32/6.3-win32/libgcc_s_sjlj-1.dll /usr/lib/gcc/i686-w64-mingw32/6.3-win32/libstdc++-6.dll"
   script:
     - *get_release_name
     - *build_ctng
     - *configure_common
     - *configure_docker
     - *configure_crossbuild
+    - *configure_win_crossbuild
     - *build_toolchain
+    - *add_extra_files
     - *package_toolchain
 
 esp32_win:
@@ -267,13 +283,16 @@ riscv32_esp_win:
     CONF_HOST: "x86_64-w64-mingw32"
     ARCHIVE_TOOL: "zip -r"
     ARCHIVE_EXT: "zip"
+    EXTRA_BINS: "/usr/lib/gcc/x86_64-w64-mingw32/6.3-win32/libgcc_s_seh-1.dll /usr/lib/gcc/x86_64-w64-mingw32/6.3-win32/libstdc++-6.dll"
   script:
     - *get_release_name
     - *build_ctng
     - *configure_common
     - *configure_docker
     - *configure_crossbuild
+    - *configure_win_crossbuild
     - *build_toolchain
+    - *add_extra_files
     - *package_toolchain
 
 esp32_win64:
@@ -399,6 +418,27 @@ riscv32_esp_lin_arm64:
     CONF_TARGET: "riscv32-esp-elf"
     CONF_HOST: "aarch64-linux-gnu"
 
+# We use prep_tests job to collect all test data and scripts in artifacts,
+# to avoid dependencies for git, because we run some tests on original images.
+prep_tests:
+  stage: pre_test
+  tags: [ "build", "amd64" ]
+  image: $CI_DOCKER_REGISTRY/compiler-testsuite:1
+  needs: []
+  variables:
+    GIT_STRATEGY: none
+    GIT_SERVER: "https://gitlab-ci-token:${ESPCI_TOKEN}@${CI_SERVER_HOST}:${CI_SERVER_PORT}"
+    ESP_COMPILER_TESTS_BRANCH: "-b master"
+  before_script: []
+  artifacts:
+    paths:
+      - esp-compiler-tests
+    expire_in: 6 weeks
+  script:
+    - git clone -q ${ESP_COMPILER_TESTS_BRANCH} "${GIT_SERVER}/idf/esp-compiler-tests.git"
+    - cd esp-compiler-tests
+    - git log -n10 --oneline
+
 .test_arm_rpi:
   stage: test
   image: $CI_DOCKER_REGISTRY/rpi-esp-idf-env:1
@@ -497,6 +537,111 @@ riscv32-compiler-tests:
     - riscv32_esp_lin_amd64
   variables:
     CONF_TARGET: "riscv32-esp-elf"
+
+.native_win64_tools_test_template:
+  stage: test
+  tags: [ "windows", "powershell" ]
+  variables:
+    GIT_STRATEGY: none
+    PLATFORM_NAME: "win64"
+  before_script: []
+  after_script:
+    - Remove-Item -Recurse -Force ${CI_PROJECT_DIR}\*
+  script:
+    - $ARCHIVE_NAME=$(cat "dist\file_${PLATFORM_NAME}_${CONF_TARGET}")
+    - Expand-Archive -DestinationPATH . "dist\$ARCHIVE_NAME"
+    - $env:PATH = "${CI_PROJECT_DIR}\${CONF_TARGET}\bin;" + $env:PATH
+    - Push-Location esp-compiler-tests\tools
+    - .\run.ps1
+    - Pop-Location
+
+# tools test win64
+
+native_win64_tools_test_esp32:
+  extends: .native_win64_tools_test_template
+  needs:
+    - job: prep_tests
+      artifacts: true
+    - job: esp32_win64
+      artifacts: true
+  variables:
+    CONF_TARGET: "xtensa-esp32-elf"
+
+native_win64_tools_test_esp32s2:
+  extends: .native_win64_tools_test_template
+  needs:
+    - job: prep_tests
+      artifacts: true
+    - job: esp32s2_win64
+      artifacts: true
+  variables:
+    CONF_TARGET: "xtensa-esp32s2-elf"
+
+native_win64_tools_test_esp32s3:
+  extends: .native_win64_tools_test_template
+  needs:
+    - job: prep_tests
+      artifacts: true
+    - job: esp32s3_win64
+      artifacts: true
+  variables:
+    CONF_TARGET: "xtensa-esp32s3-elf"
+
+native_win64_tools_test_riscv32:
+  extends: .native_win64_tools_test_template
+  needs:
+    - job: prep_tests
+      artifacts: true
+    - job: riscv32_esp_win64
+      artifacts: true
+  variables:
+    CONF_TARGET: "riscv32-esp-elf"
+
+# tools test win32
+
+native_win32_tools_test_esp32:
+  extends: .native_win64_tools_test_template
+  needs:
+    - job: prep_tests
+      artifacts: true
+    - job: esp32_win
+      artifacts: true
+  variables:
+    CONF_TARGET: "xtensa-esp32-elf"
+    PLATFORM_NAME: "win32"
+
+native_win32_tools_test_esp32s2:
+  extends: .native_win64_tools_test_template
+  needs:
+    - job: prep_tests
+      artifacts: true
+    - job: esp32s2_win
+      artifacts: true
+  variables:
+    CONF_TARGET: "xtensa-esp32s2-elf"
+    PLATFORM_NAME: "win32"
+
+native_win32_tools_test_esp32s3:
+  extends: .native_win64_tools_test_template
+  needs:
+    - job: prep_tests
+      artifacts: true
+    - job: esp32s3_win
+      artifacts: true
+  variables:
+    CONF_TARGET: "xtensa-esp32s3-elf"
+    PLATFORM_NAME: "win32"
+
+native_win32_tools_test_riscv32:
+  extends: .native_win64_tools_test_template
+  needs:
+    - job: prep_tests
+      artifacts: true
+    - job: riscv32_esp_win
+      artifacts: true
+  variables:
+    CONF_TARGET: "riscv32-esp-elf"
+    PLATFORM_NAME: "win32"
 
 upload_to_http:
   stage: private_deploy
