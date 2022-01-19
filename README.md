@@ -1,7 +1,7 @@
 # Crosstool-NG
 
 ### Duplicating Sean Mollet's Apple Silicon build:
-Follow espressif's instructions for installing homebrew items.
+Follow espressif's [instructions](https://docs.espressif.com/projects/esp-idf/en/release-v4.4/esp32/get-started/macos-setup-scratch.html#install-prerequisites) for installing homebrew items.
 Then, clone my repo of "fixes" for the currently broken arm binutils:
 
 ```
