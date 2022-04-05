@@ -1429,8 +1429,16 @@ EOF
 		UNAME_PROCESSOR=powerpc
 	    fi
 	elif test "$UNAME_PROCESSOR" = i386 ; then
-	    # uname -m returns i386 or x86_64
-	    UNAME_PROCESSOR=$UNAME_MACHINE
+	    # Avoid executing cc on OS X 10.9, as it ships with a stub
+	    # that puts up a graphical alert prompting to install
+	    # developer tools.  Any system running Mac OS X 10.7 or
+	    # later (Darwin 11 and later) is required to have a 64-bit
+	    # processor. This is not true of the ARM version of Darwin
+	    # that Apple uses in portable devices.
+	    UNAME_PROCESSOR=x86_64
+	elif test "$UNAME_PROCESSOR" = arm ; then
+	    # Same thing for apple/arm
+	    UNAME_PROCESSOR=aarch64
 	fi
 	GUESS=$UNAME_PROCESSOR-apple-darwin$UNAME_RELEASE
 	;;

@@ -1,5 +1,50 @@
 # Crosstool-NG
 
+### Duplicating Sean Mollet's Apple Silicon build:
+Follow espressif's [instructions](https://docs.espressif.com/projects/esp-idf/en/release-v4.4/esp32/get-started/macos-setup-scratch.html#install-prerequisites) for installing homebrew items and the instructions to set up a case sensitive disk image on which to perform the building.
+
+Clone my repo and checkout the proper branch:
+
+```
+git clone https://github.com/Jason2866/crosstool-NG
+cd crosstool-NG
+git checkout 2021r2-patch3-armr2
+```
+
+Clone the submodule:
+```
+git submodule update --init --recursive
+```
+
+Needed for building cross-tool
+```
+export LDFLAGS="-L/opt/homebrew/opt/ncurses/lib -L/opt/homebrew/opt/gettext/lib"
+export CPPFLAGS="-I/opt/homebrew/opt/ncurses/include -I/opt/homebrew/opt/gettext/include"
+export PKG_CONFIG_PATH="/opt/homebrew/opt/ncurses/lib/pkgconfig"
+```
+
+Build crosstool-ng:
+```
+./bootstrap
+./configure --enable-local
+make
+```
+
+Configure for xtensa
+```
+./ct-ng xtensa-esp32-elf
+```
+
+Edit .config and change the following setting:
+```
+CT_GDB_CROSS_EXTRA_CONFIG_ARRAY="--disable-tui"
+```
+
+Build it.. takes about 15 minutes
+```
+./ct-ng build
+```
+
 ## Introduction
 
 Crosstool-NG aims at building toolchains. Toolchains are an essential component in a software development project. It will compile, assemble and link the code that is being developed. Some pieces of the toolchain will eventually end up in the resulting binaries: static libraries are but an example.
