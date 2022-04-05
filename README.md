@@ -1,35 +1,19 @@
 # Crosstool-NG
 
 ### Duplicating Sean Mollet's Apple Silicon build:
-Follow espressif's [instructions](https://docs.espressif.com/projects/esp-idf/en/release-v4.4/esp32/get-started/macos-setup-scratch.html#install-prerequisites) for installing homebrew items.
-Then, clone my repo of "fixes" for the currently broken arm binutils:
-
-```
-git clone https://github.com/SeanMollet/aarch64_binutils_fixes
-```
-Copy the shell scripts from there to /opt/homebrew/opt/binutils/bin
-Replacing the binaries. You can back them up first if you like, although they don't work anyway and the cross toolchain will build its own.
-
-
-Follow espressif's instructions to set up a case sensitive disk image on which to perform the building.
-
+Follow espressif's [instructions](https://docs.espressif.com/projects/esp-idf/en/release-v4.4/esp32/get-started/macos-setup-scratch.html#install-prerequisites) for installing homebrew items and the instructions to set up a case sensitive disk image on which to perform the building.
 
 Clone my repo and checkout the proper branch:
 
 ```
 git clone https://github.com/Jason2866/crosstool-NG
 cd crosstool-NG
-git checkout esp-2021r2
+git checkout 2021r2-patch3-armr2
 ```
 
 Clone the submodule:
 ```
 git submodule update --init --recursive
-```
-
-Set the path so it can find the "binutils"
-```
-export PATH=/opt/homebrew/opt/binutils/bin:$PATH
 ```
 
 Needed for building cross-tool
