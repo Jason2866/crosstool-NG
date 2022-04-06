@@ -6,15 +6,9 @@ Follow espressif's [instructions](https://docs.espressif.com/projects/esp-idf/en
 Clone my repo and checkout the proper branch:
 
 ```
-git clone https://github.com/Jason2866/crosstool-NG
-cd crosstool-NG
-git checkout 2021r2-patch3-armr2
+git clone --recursive https://github.com/Jason2866/crosstool-NG
 ```
 
-Clone the submodule:
-```
-git submodule update --init --recursive
-```
 
 Needed for building cross-tool
 ```
