@@ -116,7 +116,8 @@ jobs:
           "x86_64-multilib-linux-uclibc",
           "x86_64-unknown-linux-gnu",
           "x86_64-w64-mingw32",
-          "xtensa-fsf-linux-uclibc"
+          "xtensa-fsf-linux-uclibc",
+          "xtensa-esp32-elf"
         ]
 
   canadian-cross:
