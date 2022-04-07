@@ -1,9 +1,9 @@
 # Crosstool-NG
 
-### Apple Silicon build:
+### Apple Silicon build (work in progress, still not working):
 Follow espressif's [instructions](https://docs.espressif.com/projects/esp-idf/en/release-v4.4/esp32/get-started/macos-setup-scratch.html#install-prerequisites) for installing homebrew items and the instructions to set up a case sensitive disk image on which to perform the building.
 
-Clone my repo and checkout the proper branch:
+Clone this repo:
 
 ```
 git clone --recursive https://github.com/Jason2866/crosstool-NG
@@ -29,12 +29,8 @@ Configure for xtensa
 ./ct-ng xtensa-esp32-elf
 ```
 
-Edit .config and change the following setting:
-```
-CT_GDB_CROSS_EXTRA_CONFIG_ARRAY="--disable-tui"
-```
 
-Build it.. takes about 15 minutes
+Build it.. should take about 15 minutes
 ```
 ./ct-ng build
 ```
