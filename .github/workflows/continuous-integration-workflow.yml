@@ -34,7 +34,6 @@ jobs:
           ./configure --prefix=$PWD/.local/
           make
           make install
-          git clone "https://github.com/espressif/xtensa-overlays.git" "$GITHUB_WORKSPACE/.local/overlays"
           tar -cf ct-ng.tar .local/
       - name: "upload ct-ng"
         uses: actions/upload-artifact@v2
@@ -82,6 +81,7 @@ jobs:
                 ct-ng olddefconfig; \
                 ct-ng source; \
           done
+          git clone "https://github.com/espressif/xtensa-overlays.git" "$GITHUB_WORKSPACE/.local/overlays"
           tar -cvf src.tar src
       - name: "upload sources"
         uses: actions/upload-artifact@v2
