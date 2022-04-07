@@ -62,7 +62,6 @@ jobs:
       - name: "extract ct-ng"
         run: |
           tar -xf ct-ng.tar
-          git clone "https://github.com/espressif/xtensa-overlays.git" "$GITHUB_WORKSPACE/.local/overlays"
       - name: "prereq Linux"
         if: ${{ runner.os == 'Linux' }}
         run: |
