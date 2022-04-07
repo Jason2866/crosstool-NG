@@ -34,6 +34,7 @@ jobs:
           ./configure --prefix=$PWD/.local/
           make
           make install
+          git clone "https://github.com/espressif/xtensa-overlays.git" "$GITHUB_WORKSPACE/.local/share/crosstool-ng/overlays"
           tar -cf ct-ng.tar .local/
       - name: "upload ct-ng"
         uses: actions/upload-artifact@v2
