@@ -1,20 +1,14 @@
 # Crosstool-NG
 
-### Duplicating Sean Mollet's Apple Silicon build:
+### Apple Silicon build:
 Follow espressif's [instructions](https://docs.espressif.com/projects/esp-idf/en/release-v4.4/esp32/get-started/macos-setup-scratch.html#install-prerequisites) for installing homebrew items and the instructions to set up a case sensitive disk image on which to perform the building.
 
 Clone my repo and checkout the proper branch:
 
 ```
-git clone https://github.com/Jason2866/crosstool-NG
-cd crosstool-NG
-git checkout 2021r2-patch3-armr2
+git clone --recursive https://github.com/Jason2866/crosstool-NG
 ```
 
-Clone the submodule:
-```
-git submodule update --init --recursive
-```
 
 Needed for building cross-tool
 ```
