@@ -1,4 +1,6 @@
 # Generated files
+.DS_Store
+configure~
 configure
 autom4te.cache
 aclocal.m4
