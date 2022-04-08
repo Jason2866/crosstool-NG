@@ -97,8 +97,7 @@ jobs:
       samples: >-
         [
           "aarch64-unknown-linux-gnu",
-          "x86_64-w64-mingw32",
-          "xtensa-esp32-elf"
+          "x86_64-w64-mingw32"
         ]
 
   canadian-cross:
