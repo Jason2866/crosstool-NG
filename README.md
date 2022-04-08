@@ -12,6 +12,7 @@ git clone --recursive https://github.com/Jason2866/crosstool-NG
 
 Needed for building cross-tool
 ```
+export PATH="$PATH:/opt/homebrew/opt/m4/bin"
 export PATH="$PATH:/opt/homebrew/opt/binutils/bin"
 export LDFLAGS="-L/opt/homebrew/opt/ncurses/lib -L/opt/homebrew/opt/gettext/lib"
 export CPPFLAGS="-I/opt/homebrew/opt/ncurses/include -I/opt/homebrew/opt/gettext/include"
