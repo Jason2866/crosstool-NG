@@ -56,7 +56,7 @@ config GMP_TARGET
     select COMP_LIBS_GMP
 
 config MPFR_NEEDED
-    bool
+    def_bool y
     select GMP_NEEDED
     select COMP_LIBS_MPFR
 
