@@ -1,5 +1,57 @@
 # Crosstool-NG
 
+### Apple Silicon build (work in progress, you walk alone...):
+Follow espressif's [instructions](https://docs.espressif.com/projects/esp-idf/en/release-v4.4/esp32/get-started/macos-setup-scratch.html#install-prerequisites) for installing homebrew items and the instructions to set up a case sensitive disk image on which to perform the building.
+
+Maybe increase max open files limit is needed:
+
+```
+sudo launchctl limit maxfiles 65536 200000
+```
+
+Clone my repo:
+```
+git clone --recursive https://github.com/Jason2866/crosstool-NG
+cd crosstool-NG
+```
+
+
+Needed for building cross-tool
+```
+export PATH="$PATH:/opt/homebrew/opt/binutils/bin"
+export LDFLAGS="-L/opt/homebrew/opt/ncurses/lib -L/opt/homebrew/opt/gettext/lib"
+export CPPFLAGS="-I/opt/homebrew/opt/ncurses/include -I/opt/homebrew/opt/gettext/include"
+export PKG_CONFIG_PATH="/opt/homebrew/opt/ncurses/lib/pkgconfig"
+```
+
+Build crosstool-ng:
+```
+./bootstrap
+./configure --enable-local
+make
+```
+
+Configure for xtensa ESP32
+```
+./ct-ng xtensa-esp32-elf
+```
+
+Start menuconfig
+```
+./ct-ng menuconfig
+```
+and add in GDB section under...
+```
+--disable-tui
+```
+
+Build, should take about 20 minutes
+```
+./ct-ng build
+```
+
+for S2, S3 and C3 repeat the steps after *Configure* accordingly. If it works, great! If not, you walk alone...  
+
 ## Introduction
 
 Crosstool-NG aims at building toolchains. Toolchains are an essential component in a software development project. It will compile, assemble and link the code that is being developed. Some pieces of the toolchain will eventually end up in the resulting binaries: static libraries are but an example.
@@ -157,3 +209,4 @@ Report issues at [the project site on GitHub](https://github.com/crosstool-ng/cr
 We have a [mailing list](mailto:crossgcc@sourceware.org). Archive and subscription info can be found here: [https://sourceware.org/ml/crossgcc/](https://sourceware.org/ml/crossgcc/)
 
 Aloha! :-)
+
