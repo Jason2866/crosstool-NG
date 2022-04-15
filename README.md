@@ -40,7 +40,7 @@ Start menuconfig
 ```
 ./ct-ng menuconfig
 ```
-and add in GDB section under...
+and add in Debug facilities  ---> * gdb  ---> Cross-gdb extra config 
 ```
 --disable-tui
 ```
