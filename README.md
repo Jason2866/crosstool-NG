@@ -48,6 +48,7 @@ and add in Debug facilities  ---> * gdb  ---> Cross-gdb extra config
 Build, should take about 20 minutes
 ```
 ./ct-ng build
+chmod -R u+w builds/xtensa-esp32-elf
 ```
 
 for S2, S3 and C3 repeat the steps after *Configure* accordingly. If it works, great! If not, you walk alone...  
