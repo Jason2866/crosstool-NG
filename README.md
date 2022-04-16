@@ -1,6 +1,6 @@
 # Crosstool-NG
 
-### Apple Silicon build (work in progress, you walk alone...):
+### Apple Silicon build:
 Follow espressif's [instructions](https://docs.espressif.com/projects/esp-idf/en/release-v4.4/esp32/get-started/macos-setup-scratch.html#install-prerequisites) for installing homebrew items and the instructions to set up a case sensitive disk image on which to perform the building.
 
 Maybe increase max open files limit is needed:
