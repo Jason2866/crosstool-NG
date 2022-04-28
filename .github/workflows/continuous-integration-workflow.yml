@@ -102,30 +102,7 @@ jobs:
           "macos-10.15",
         ]
         sample: [
-          "aarch64-unknown-linux-gnu",
-          "arc-multilib-elf32",
-          "arc-multilib-linux-gnu",
-          "arc-multilib-linux-uclibc",
-          "arm-picolibc-eabi",
-          "arm-unknown-linux-gnueabi",
-          "arm-unknown-linux-musleabi",
-          "armv6-nommu-linux-uclibcgnueabi",
-          "avr",
-          "i686-w64-mingw32",
-          "mips-unknown-elf",
-          "mips-unknown-linux-gnu",
-          "mips64-unknown-linux-gnu",
-          "powerpc-unknown-linux-gnu",
-          "powerpc64-unknown-linux-gnu",
-          "riscv32-unknown-elf",
-          "riscv64-unknown-elf",
-          "s390-unknown-linux-gnu",
-          "sh-unknown-elf",
-          "sparc-unknown-linux-gnu",
-          "x86_64-unknown-linux-gnu",
-          "x86_64-multilib-linux-uclibc",
-          "x86_64-w64-mingw32",
-          "xtensa-fsf-linux-uclibc"
+          "xtensa-lx106-elf"
         ]
         exclude:
           # Exclude both glibc & uClibc ARC Linux toolchains as
