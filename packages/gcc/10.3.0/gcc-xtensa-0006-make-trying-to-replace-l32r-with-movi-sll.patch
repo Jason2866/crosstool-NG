@@ -1,0 +1,29 @@
+From f1568d0597ffd3027eebefc2cf31646ab5d5ca19 Mon Sep 17 00:00:00 2001
+From: Takayuki 'January June' Suwa <jjsuwa_sys3175@yahoo.co.jp>
+Date: Sun, 19 Dec 2021 22:44:03 +0900
+Subject: [PATCH] gcc: xtensa: make trying to replace 'l32r' with 'movi' +
+ 'slli' regardless of optimizing for size or not, because 'l32r' is much
+ slower than the latter on ESP8266
+
+---
+ gcc/config/xtensa/xtensa.c | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/gcc/config/xtensa/xtensa.c b/gcc/config/xtensa/xtensa.c
+index 37c6ac1fd..6cd9d5528 100644
+--- a/gcc/config/xtensa/xtensa.c
++++ b/gcc/config/xtensa/xtensa.c
+@@ -1074,8 +1074,8 @@ xtensa_emit_move_sequence (rtx *operands, machine_mode mode)
+ 	{
+ 	  /* Try to emit MOVI + SLLI sequence, that is smaller
+ 	     than L32R + literal.  */
+-	  if (optimize_size && mode == SImode && CONST_INT_P (src)
+-	      && register_operand (dst, mode))
++	  if (optimize >= 1 && ! optimize_debug && mode == SImode
++	      && CONST_INT_P (src) && register_operand (dst, mode))
+ 	    {
+ 	      HOST_WIDE_INT srcval = INTVAL (src);
+ 	      int shift = ctz_hwi (srcval);
+-- 
+2.20.1
+
