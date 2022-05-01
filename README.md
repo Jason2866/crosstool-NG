@@ -16,7 +16,7 @@ cd crosstool-NG
 ```
 
 
-Needed for building cross-tool
+Needed for building cross-tool (install binutils and ncurses via homebrew)
 ```
 export PATH="$PATH:/opt/homebrew/opt/binutils/bin"
 export LDFLAGS="-L/opt/homebrew/opt/ncurses/lib -L/opt/homebrew/opt/gettext/lib"
@@ -34,15 +34,6 @@ make
 Configure for xtensa ESP32
 ```
 ./ct-ng xtensa-esp32-elf
-```
-
-Start menuconfig
-```
-./ct-ng menuconfig
-```
-and add in Debug facilities  ---> * gdb  ---> Cross-gdb extra config 
-```
---disable-tui
 ```
 
 Build, should take about 20 minutes
