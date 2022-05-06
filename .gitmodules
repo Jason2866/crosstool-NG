@@ -1,0 +1,3 @@
+[submodule "xtensa-overlays"]
+	path = overlays
+	url = https://github.com/espressif/xtensa-overlays
