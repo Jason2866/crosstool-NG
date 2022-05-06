@@ -1,0 +1,175 @@
+Subject: [PATCH] Darwin, aarch64 : Initial support for the self-host driver.
+From 758e0f6f18bdbe0e5dd74f756802edfa8f414942 Mon Sep 17 00:00:00 2001
+From: Jason2866 <24528715+Jason2866@users.noreply.github.com>
+Date: Fri, 6 May 2022 14:34:39 +0200
+
+gcc/ChangeLog:
+
+	* config.host: Add support for aarch64-*-darwin.
+	* config/aarch64/host-aarch64-darwin.c: New file.
+	* config/aarch64/x-darwin: New file.
+---
+ gcc/config.host | 50 ++++++++++++++++++++++++++++++++-----------------
+ gcc/config/aarch64/host-aarch64-darwin.c |   33 +++++++++++++++++++++++++++++++
+ gcc/config/aarch64/x-darwin              |    3 ++
+ 3 files changed
+ create mode 100644 gcc/config/aarch64/host-aarch64-darwin.c
+ create mode 100644 gcc/config/aarch64/x-darwin
+
+--- a/gcc/config.host
++++ b/gcc/config.host
+@@ -1,5 +1,5 @@
+ # GCC host-specific configuration file.
+-# Copyright (C) 1997-2013 Free Software Foundation, Inc.
++# Copyright (C) 1997-2022 Free Software Foundation, Inc.
+ 
+ #This file is part of GCC.
+ 
+@@ -99,7 +99,16 @@ case ${host} in
+ esac
+ 
+ case ${host} in
+-  arm*-*-linux*)
++  aarch64*-*-freebsd* | aarch64*-*-linux* | aarch64*-*-fuchsia* |\
++  aarch64*-*-darwin*)
++    case ${target} in
++      aarch64*-*-*)
++	host_extra_gcc_objs="driver-aarch64.o"
++	host_xmake_file="${host_xmake_file} aarch64/x-aarch64"
++	;;
++    esac
++    ;;
++  arm*-*-freebsd* | arm*-*-netbsd* | arm*-*-linux* | arm*-*-fuchsia*)
+     case ${target} in
+       arm*-*-*)
+ 	host_extra_gcc_objs="driver-arm.o"
+@@ -164,6 +173,14 @@ case ${host} in
+ 	;;
+     esac
+     ;;
++  s390-*-* | s390x-*-*)
++    case ${target} in
++      s390-*-* | s390x-*-*)
++        host_extra_gcc_objs="driver-native.o"
++        host_xmake_file="${host_xmake_file} s390/x-native"
++        ;;
++    esac
++    ;;
+   sparc*-*-solaris2*)
+     case ${target} in
+       sparc*-*-solaris2*)
+@@ -197,10 +214,7 @@ case ${host} in
+     out_host_hook_obj=host-hpux.o
+     host_xmake_file="${host_xmake_file} x-hpux"
+     ;;
+-  i370-*-opened* | i370-*-mvs* ) # IBM 360/370/390 Architecture
+-    host_xm_defines='FATAL_EXIT_CODE=12'
+-    ;;
+-  i[34567]86-*-solaris2* | x86_64-*-solaris2.1[0-9]*)
++  i[34567]86-*-solaris2* | x86_64-*-solaris2*)
+     out_host_hook_obj=host-solaris.o
+     host_xmake_file="${host_xmake_file} x-solaris"
+     ;;
+@@ -214,19 +228,20 @@ case ${host} in
+         ;;
+     esac
+     ;;
+-  i[34567]86-*-cygwin*)
++  i[34567]86-*-cygwin* | x86_64-*-cygwin*)
+     host_xm_file=i386/xm-cygwin.h
+     out_host_hook_obj=host-cygwin.o
+     host_xmake_file="${host_xmake_file} i386/x-cygwin"
+     host_exeext=.exe
+-    host_lto_plugin_soname=cyglto_plugin-0.dll
++    host_lto_plugin_soname=cyglto_plugin.dll
+     ;;
+   i[34567]86-*-mingw32*)
+     host_xm_file=i386/xm-mingw32.h
+     host_xmake_file="${host_xmake_file} i386/x-mingw32"
+     host_exeext=.exe
+     out_host_hook_obj=host-mingw32.o
+-    host_lto_plugin_soname=liblto_plugin-0.dll
++    host_extra_gcc_objs="${host_extra_gcc_objs} driver-mingw32.o"
++    host_lto_plugin_soname=liblto_plugin.dll
+     ;;
+   x86_64-*-mingw*)
+     use_long_long_for_widest_fast_int=yes
+@@ -234,20 +249,17 @@ case ${host} in
+     host_xmake_file="${host_xmake_file} i386/x-mingw32"
+     host_exeext=.exe
+     out_host_hook_obj=host-mingw32.o
+-    host_lto_plugin_soname=liblto_plugin-0.dll
++    host_extra_gcc_objs="${host_extra_gcc_objs} driver-mingw32.o"
++    host_lto_plugin_soname=liblto_plugin.dll
+     ;;
+-  i[34567]86-*-uwin*)
+-    echo "*** UWIN may not be used as a host platform because"
+-    echo "*** linking with posix.dll is not allowed by the GNU GPL."
+-    exit 1
++  aarch64*-*-darwin*)
++    out_host_hook_obj="${out_host_hook_obj} host-aarch64-darwin.o"
++    host_xmake_file="${host_xmake_file} aarch64/x-darwin"
+     ;;
+   i[34567]86-*-darwin* | x86_64-*-darwin*)
+     out_host_hook_obj="${out_host_hook_obj} host-i386-darwin.o"
+     host_xmake_file="${host_xmake_file} i386/x-darwin"
+     ;;
+-  powerpc-*-beos*)
+-    host_can_use_collect2=no
+-    ;;
+   powerpc-*-darwin*)
+     out_host_hook_obj="${out_host_hook_obj} host-ppc-darwin.o"
+     host_xmake_file="${host_xmake_file} rs6000/x-darwin"
+@@ -271,6 +283,10 @@ case ${host} in
+     out_host_hook_obj=host-openbsd.o
+     host_xmake_file="${host_xmake_file} x-openbsd"
+     ;;
++  *-*-netbsd*)
++    out_host_hook_obj=host-netbsd.o
++    host_xmake_file="${host_xmake_file} x-netbsd"
++    ;;
+   ia64-*-hpux*)
+     use_long_long_for_widest_fast_int=yes
+     out_host_hook_obj=host-hpux.o
+
++++ b/gcc/config/aarch64/host-aarch64-darwin.c
+@@ -0,0 +1,33 @@
++/* aarch64/arm64-darwin host-specific hook definitions.
++
++Copyright The GNU Toolchain Authors.
++
++This file is part of GCC.
++
++GCC is free software; you can redistribute it and/or modify it under
++the terms of the GNU General Public License as published by the Free
++Software Foundation; either version 3, or (at your option) any later
++version.
++
++GCC is distributed in the hope that it will be useful, but WITHOUT ANY
++WARRANTY; without even the implied warranty of MERCHANTABILITY or
++FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
++for more details.
++
++You should have received a copy of the GNU General Public License
++along with GCC; see the file COPYING3.  If not see
++<http://www.gnu.org/licenses/>.  */
++
++#define IN_TARGET_CODE 1
++
++#include "config.h"
++#include "system.h"
++#include "coretypes.h"
++#include "hosthooks.h"
++#include "hosthooks-def.h"
++#include "config/host-darwin.h"
++
++/* Darwin doesn't do anything special for arm64/aarch64 hosts; this file
++   exists just to include the generic config/host-darwin.h.  */
++
++const struct host_hooks host_hooks = HOST_HOOKS_INITIALIZER;
+--- /dev/null
++++ b/gcc/config/aarch64/x-darwin
+@@ -0,0 +1,3 @@
++host-aarch64-darwin.o : $(srcdir)/config/aarch64/host-aarch64-darwin.c
++	$(COMPILE) $<
++	$(POSTCOMPILE)
