@@ -46,3 +46,4 @@ testing/docker/*/xtools
 release/
 .DS_Store
 configure~
+builds/
