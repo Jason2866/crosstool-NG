@@ -1,0 +1,269 @@
+From 143d11845848ac266d301dda2cdf520e2f06ca5e Mon Sep 17 00:00:00 2001
+From: Alexey Gerenkov <alexey@espressif.com>
+Date: Mon, 18 Sep 2017 10:10:19 +0800
+Subject: [PATCH] xtensa: gcov custom runtime file I/O API support
+
+---
+ gcc/gcov-io.c           | 53 ++++++++++++++++++++++++++++++++++-------
+ libgcc/Makefile.in      |  2 +-
+ libgcc/configure        | 12 ++++++++++
+ libgcc/configure.ac     |  6 +++++
+ libgcc/libgcov-driver.c | 23 ++++++++++++++++++
+ 5 files changed, 87 insertions(+), 9 deletions(-)
+
+diff --git a/gcc/gcov-io.c b/gcc/gcov-io.c
+index 80c9082a6495..2386702399a9 100644
+--- a/gcc/gcov-io.c
++++ b/gcc/gcov-io.c
+@@ -28,8 +28,41 @@ see the files COPYING3 and COPYING.RUNTIME respectively.  If not, see
+    another source file, after having #included gcov-io.h.  */
+ 
+ #if !IN_GCOV
++
++#if GCOV_CUSTOM_RTIO
++void * gcov_rtio_fopen(const char *path, const char *mode) __attribute__((weak));
++int    gcov_rtio_fclose(void *stream) __attribute__((weak));
++size_t gcov_rtio_fread(void *ptr, size_t size, size_t nmemb, void *stream) __attribute__((weak));
++size_t gcov_rtio_fwrite(const void *ptr, size_t size, size_t nmemb, void *stream) __attribute__((weak));
++int    gcov_rtio_fseek(void *stream, long offset, int whence) __attribute__((weak));
++long   gcov_rtio_ftell(void *stream) __attribute__((weak));
++void * gcov_rtio_fopen(const char *path __attribute__ ((unused)), const char *mode __attribute__ ((unused))) {return NULL;}
++int    gcov_rtio_fclose(void *stream __attribute__ ((unused))) {return 0;}
++size_t gcov_rtio_fread(void *ptr __attribute__ ((unused)), size_t size __attribute__ ((unused)), size_t nmemb __attribute__ ((unused)), void *stream __attribute__ ((unused))) {return 0;}
++size_t gcov_rtio_fwrite(const void *ptr __attribute__ ((unused)), size_t size __attribute__ ((unused)), size_t nmemb __attribute__ ((unused)), void *stream __attribute__ ((unused))) {return 0;}
++int    gcov_rtio_fseek(void *stream __attribute__ ((unused)), long offset __attribute__ ((unused)), int whence __attribute__ ((unused))) {return 0;}
++long   gcov_rtio_ftell(void *stream __attribute__ ((unused))) {return 0;}
++#define GCOV_FOPEN(_p_, _m_)             gcov_rtio_fopen(_p_, _m_)
++#define GCOV_FCLOSE(_f_)                 gcov_rtio_fclose(_f_)
++#define GCOV_FWRITE(_b_, _s_, _c_, _f_)  gcov_rtio_fwrite(_b_, _s_, _c_, _f_)
++#define GCOV_FREAD(_b_, _s_, _c_, _f_)   (__gcov_no_merge ? 0 : gcov_rtio_fread(_b_, _s_, _c_, _f_))
++#define GCOV_FSEEK(_f_, _p_, _w_)        gcov_rtio_fseek(_f_, _p_, _w_)
++#define GCOV_FTELL(_f_)                  gcov_rtio_ftell(_f_)
++#else
++#define GCOV_FOPEN(_p_, _m_)             fopen(_p_, _m_)
++#define GCOV_FCLOSE(_f_)                 fclose(_f_)
++#define GCOV_FWRITE(_b_, _s_, _c_, _f_)  fwrite(_b_, _s_, _c_, _f_)
++#define GCOV_FREAD(_b_, _s_, _c_, _f_)   fread(_b_, _s_, _c_, _f_)
++#define GCOV_FSEEK(_f_, _o_, _w_)        fseek(_f_, _o_, _w_)
++#define GCOV_FTELL(_f_)                  ftell(_f_)
++#endif
++
+ static void gcov_write_block (unsigned);
+ static gcov_unsigned_t *gcov_write_words (unsigned);
++#else
++#define GCOV_FOPEN(_p_, _m_)             fopen(_p_, _m_)
++#define GCOV_FCLOSE(_f_)                 fclose(_f_)
++#define GCOV_FREAD(_b_, _s_, _c_, _f_)   fread(_b_, _s_, _c_, _f_)
+ #endif
+ static const gcov_unsigned_t *gcov_read_words (unsigned);
+ #if !IN_LIBGCOV
+@@ -94,7 +127,7 @@ gcov_rewrite (void)
+   gcov_var.mode = -1; 
+   gcov_var.start = 0;
+   gcov_var.offset = 0;
+-  fseek (gcov_var.file, 0L, SEEK_SET);
++  GCOV_FSEEK (gcov_var.file, 0L, SEEK_SET);
+ }
+ #endif
+ 
+@@ -139,7 +172,9 @@ gcov_open (const char *name, int mode)
+   s_flock.l_pid = getpid ();
+ #endif
+ 
++#if GCOV_CUSTOM_RTIO == 0
+   gcov_nonruntime_assert (!gcov_var.file);
++#endif
+   gcov_var.start = 0;
+   gcov_var.offset = gcov_var.length = 0;
+   gcov_var.overread = -1u;
+@@ -178,13 +213,13 @@ gcov_open (const char *name, int mode)
+ #else
+   if (mode >= 0)
+     /* Open an existing file.  */
+-    gcov_var.file = fopen (name, (mode > 0) ? "rb" : "r+b");
++    gcov_var.file = GCOV_FOPEN (name, (mode > 0) ? "rb" : "r+b");
+ 
+   if (gcov_var.file)
+     mode = 1;
+   else if (mode <= 0)
+     /* Create a new file.  */
+-    gcov_var.file = fopen (name, "w+b");
++    gcov_var.file = GCOV_FOPEN (name, "w+b");
+ 
+   if (!gcov_var.file)
+     return 0;
+@@ -192,7 +227,9 @@ gcov_open (const char *name, int mode)
+ 
+   gcov_var.mode = mode ? mode : 1;
+ 
++#if GCOV_CUSTOM_RTIO == 0
+   setbuf (gcov_var.file, (char *)0);
++#endif
+ 
+   return 1;
+ }
+@@ -209,7 +246,7 @@ gcov_close (void)
+       if (gcov_var.offset && gcov_var.mode < 0)
+ 	gcov_write_block (gcov_var.offset);
+ #endif
+-      fclose (gcov_var.file);
++      GCOV_FCLOSE (gcov_var.file);
+       gcov_var.file = 0;
+       gcov_var.length = 0;
+     }
+@@ -265,7 +302,7 @@ gcov_allocate (unsigned length)
+ static void
+ gcov_write_block (unsigned size)
+ {
+-  if (fwrite (gcov_var.buffer, size << 2, 1, gcov_var.file) != 1)
++  if (GCOV_FWRITE (gcov_var.buffer, size << 2, 1, gcov_var.file) != 1)
+     gcov_var.error = 1;
+   gcov_var.start += size;
+   gcov_var.offset -= size;
+@@ -488,7 +525,7 @@ gcov_read_words (unsigned words)
+ 	gcov_allocate (gcov_var.length + words);
+       excess = gcov_var.alloc - gcov_var.length;
+ #endif
+-      excess = fread (gcov_var.buffer + gcov_var.length,
++      excess = GCOV_FREAD (gcov_var.buffer + gcov_var.length,
+ 		      1, excess << 2, gcov_var.file) >> 2;
+       gcov_var.length += excess;
+       if (gcov_var.length < words)
+@@ -643,8 +680,8 @@ gcov_seek (gcov_position_t base)
+ {
+   if (gcov_var.offset)
+     gcov_write_block (gcov_var.offset);
+-  fseek (gcov_var.file, base << 2, SEEK_SET);
+-  gcov_var.start = ftell (gcov_var.file) >> 2;
++  GCOV_FSEEK (gcov_var.file, base << 2, SEEK_SET);
++  gcov_var.start = GCOV_FTELL (gcov_var.file) >> 2;
+ }
+ #endif
+ 
+diff --git a/libgcc/Makefile.in b/libgcc/Makefile.in
+index 2c8be561eb53..60440a57e845 100644
+--- a/libgcc/Makefile.in
++++ b/libgcc/Makefile.in
+@@ -295,7 +295,7 @@ override CFLAGS := $(filter-out -fprofile-generate -fprofile-use,$(CFLAGS))
+ # will usually contain -g, so for the moment CFLAGS goes first.  We must
+ # include CFLAGS - that's where multilib options live.
+ INTERNAL_CFLAGS = $(CFLAGS) $(LIBGCC2_CFLAGS) $(HOST_LIBGCC2_CFLAGS) \
+-		  $(INCLUDES) @set_have_cc_tls@ @set_use_emutls@
++		  $(INCLUDES) @set_have_cc_tls@ @set_use_emutls@ @gcov_custom_rtio_flags@
+ 
+ # Options to use when compiling crtbegin/end.
+ CRTSTUFF_CFLAGS = -O2 $(GCC_CFLAGS) $(INCLUDES) $(MULTILIB_CFLAGS) -g0 \
+diff --git a/libgcc/configure b/libgcc/configure
+index 4919a56f5181..20713abe3b41 100755
+--- a/libgcc/configure
++++ b/libgcc/configure
+@@ -605,6 +605,7 @@ solaris_ld_v2_maps
+ real_host_noncanonical
+ accel_dir_suffix
+ use_tm_clone_registry
++gcov_custom_rtio_flags
+ force_explicit_eh_registry
+ CET_FLAGS
+ fixed_point
+@@ -715,6 +716,7 @@ with_system_libunwind
+ enable_cet
+ enable_explicit_exception_frame_registration
+ enable_tm_clone_registry
++enable_gcov_custom_rtio
+ with_glibc_version
+ enable_tls
+ with_gcc_major_version_only
+@@ -1359,6 +1361,9 @@ Optional Features:
+                           start, for use e.g. for compatibility with
+                           installations without PT_GNU_EH_FRAME support
+   --disable-tm-clone-registry    disable TM clone registry
++  --enable-gcov-custom-rtio
++                          Enable custom file I/O API for gcov at runtime
++                          (default is no)
+   --enable-tls            Use thread-local storage [default=yes]
+ 
+ Optional Packages:
+@@ -4994,6 +4999,13 @@ fi
+ 
+ 
+ 
++# Check whether --enable-gcov-custom-rtio was given.
++if test "${enable_gcov_custom_rtio+set}" = set; then :
++  enableval=$enable_gcov_custom_rtio; gcov_custom_rtio_flags=-DGCOV_CUSTOM_RTIO=1
++fi
++
++
++
+ # Check whether --enable-tm-clone-registry was given.
+ if test "${enable_tm_clone_registry+set}" = set; then :
+   enableval=$enable_tm_clone_registry;
+diff --git a/libgcc/configure.ac b/libgcc/configure.ac
+index 13a80b2551bc..d33dfb1bd831 100644
+--- a/libgcc/configure.ac
++++ b/libgcc/configure.ac
+@@ -278,6 +278,12 @@ fi
+ ])
+ AC_SUBST([force_explicit_eh_registry])
+ 
++AC_ARG_ENABLE(gcov-custom-rtio,
++[AS_HELP_STRING([--enable-gcov-custom-rtio],
++  [Enable custom file I/O API for gcov at runtime (default is no)])],
++gcov_custom_rtio_flags=-DGCOV_CUSTOM_RTIO=1, )
++AC_SUBST(gcov_custom_rtio_flags)
++
+ AC_ARG_ENABLE([tm-clone-registry],
+ [  --disable-tm-clone-registry    disable TM clone registry],
+ [
+diff --git a/libgcc/libgcov-driver.c b/libgcc/libgcov-driver.c
+index a1338b6e5255..2586f4fbd5ed 100644
+--- a/libgcc/libgcov-driver.c
++++ b/libgcc/libgcov-driver.c
+@@ -48,11 +48,22 @@ void __gcov_init (struct gcov_info *p __attribute__ ((unused))) {}
+ 
+ #ifdef L_gcov
+ 
++#if GCOV_CUSTOM_RTIO
++int gcov_rtio_atexit(void (*function)(void)) __attribute__((weak));
++int gcov_rtio_atexit(void (*function)(void) __attribute__ ((unused))) {return 0;}
++#else
++#define dbg_printf(...)
++#endif
++
+ /* A utility function for outputting errors.  */
+ static int gcov_error (const char *, ...);
+ 
+ #if !IN_GCOV_TOOL
+ static void gcov_error_exit (void);
++
++#if GCOV_CUSTOM_RTIO
++static int __gcov_no_merge;
++#endif
+ #endif
+ 
+ #include "gcov-io.c"
+@@ -650,6 +661,15 @@ __gcov_exit (void)
+   gcov_error_exit ();
+ }
+ 
++#if GCOV_CUSTOM_RTIO
++static void
++__gcov_exit_nomerge (void)
++{
++  __gcov_no_merge = 1;
++  __gcov_exit ();
++}
++#endif
++
+ /* Add a new object file onto the bb chain.  Invoked automatically
+   when running an object file's global ctors.  */
+ 
+@@ -670,6 +690,9 @@ __gcov_init (struct gcov_info *info)
+ 		__gcov_master.root->prev = &__gcov_root;
+ 	      __gcov_master.root = &__gcov_root;
+ 	    }
++#if GCOV_CUSTOM_RTIO
++	  gcov_rtio_atexit(__gcov_exit_nomerge);
++#endif
+ 	}
+ 
+       info->next = __gcov_root.list;

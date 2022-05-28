@@ -1,0 +1,48 @@
+From fc3fa26696a4f0225831170c5d8a70a3a1b9c296 Mon Sep 17 00:00:00 2001
+From: Anton Maklakov <anton@espressif.com>
+Date: Thu, 4 Apr 2019 11:36:33 +0700
+Subject: [PATCH] libstdc++, xtensa: Allows to enable
+ '--enable_libstdcxx_time=yes' for canadian cross builds.
+
+Clean regenerate the configure script, revert a part of 3dbae38b565b6021e1c0e4e274bbc20d76e3cdd8
+---
+ libstdc++-v3/acinclude.m4 | 7 +++++++
+ libstdc++-v3/configure    | 7 +++++++
+ 2 files changed, 14 insertions(+)
+
+diff --git a/libstdc++-v3/acinclude.m4 b/libstdc++-v3/acinclude.m4
+index 1c0a4c130525..8ac14dad7ed0 100644
+--- a/libstdc++-v3/acinclude.m4
++++ b/libstdc++-v3/acinclude.m4
+@@ -1464,6 +1464,13 @@ AC_DEFUN([GLIBCXX_ENABLE_LIBSTDCXX_TIME], [
+         ac_has_sched_yield=yes
+     esac
+ 
++  elif test x"$enable_libstdcxx_time" = x"yes"; then
++    # xtensa-esp32: This sets the same settings for canadian cross and native builds
++    ac_has_clock_monotonic=yes
++    ac_has_clock_realtime=yes
++    ac_has_nanosleep=no
++    ac_has_sched_yield=yes
++
+   elif test x"$enable_libstdcxx_time" != x"no"; then
+ 
+     if test x"$enable_libstdcxx_time" = x"rt"; then
+diff --git a/libstdc++-v3/configure b/libstdc++-v3/configure
+index ce2defd28a13..d170a38d06ce 100755
+--- a/libstdc++-v3/configure
++++ b/libstdc++-v3/configure
+@@ -20623,6 +20623,13 @@ fi
+         ac_has_sched_yield=yes
+     esac
+ 
++  elif test x"$enable_libstdcxx_time" = x"yes"; then
++    # xtensa-esp32: This sets the same settings for canadian cross and native builds
++    ac_has_clock_monotonic=yes
++    ac_has_clock_realtime=yes
++    ac_has_nanosleep=no
++    ac_has_sched_yield=yes
++
+   elif test x"$enable_libstdcxx_time" != x"no"; then
+ 
+     if test x"$enable_libstdcxx_time" = x"rt"; then

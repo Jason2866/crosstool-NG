@@ -1,0 +1,21 @@
+From 6d4c45d4d410aa4b0f6b6243ecc6f37f52c23fd3 Mon Sep 17 00:00:00 2001
+From: Ivan Grokhotkov <ivan@espressif.com>
+Date: Wed, 30 Aug 2017 12:09:32 +0800
+Subject: [PATCH] libstdc++: enable defines for pthreads support
+
+---
+ libstdc++-v3/config/os/newlib/os_defines.h | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/libstdc++-v3/config/os/newlib/os_defines.h b/libstdc++-v3/config/os/newlib/os_defines.h
+index bbf5794d9d5d..91c790d0fbbe 100644
+--- a/libstdc++-v3/config/os/newlib/os_defines.h
++++ b/libstdc++-v3/config/os/newlib/os_defines.h
+@@ -58,4 +58,7 @@
+ 
+ #endif
+ 
++#define _GTHREAD_USE_MUTEX_INIT_FUNC  1
++#define _GLIBCXX_USE_SCHED_YIELD      1
++
+ #endif

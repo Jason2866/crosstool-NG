@@ -1,0 +1,43 @@
+From 92141fd87b51fd4cb681e7b657608e21d0b47218 Mon Sep 17 00:00:00 2001
+From: Alexey Gerenkov <alexey@espressif.com>
+Date: Thu, 16 Nov 2017 15:06:35 +0300
+Subject: [PATCH] xtensa: Configurable exception emergency pool size
+
+---
+ libstdc++-v3/libsupc++/eh_alloc.cc | 16 +++++++++++++---
+ 1 file changed, 13 insertions(+), 3 deletions(-)
+
+diff --git a/libstdc++-v3/libsupc++/eh_alloc.cc b/libstdc++-v3/libsupc++/eh_alloc.cc
+index 294440fdaa62..04f2de7a7d97 100644
+--- a/libstdc++-v3/libsupc++/eh_alloc.cc
++++ b/libstdc++-v3/libsupc++/eh_alloc.cc
+@@ -73,6 +73,14 @@ using namespace __cxxabiv1;
+ # define EMERGENCY_OBJ_COUNT	4
+ #endif
+ 
++static const size_t DEFAULT_ARENA_SIZE = EMERGENCY_OBJ_SIZE * EMERGENCY_OBJ_COUNT * sizeof (__cxa_dependent_exception);
++
++extern "C" size_t __cxx_eh_arena_size_get() __attribute__((weak));
++extern "C" size_t __cxx_eh_arena_size_get()
++{
++    return DEFAULT_ARENA_SIZE;
++}
++
+ namespace __gnu_cxx
+ {
+   void __freeres();
+@@ -118,9 +126,11 @@ namespace
+     {
+       // Allocate the arena - we could add a GLIBCXX_EH_ARENA_SIZE environment
+       // to make this tunable.
+-      arena_size = (EMERGENCY_OBJ_SIZE * EMERGENCY_OBJ_COUNT
+-		    + EMERGENCY_OBJ_COUNT * sizeof (__cxa_dependent_exception));
+-      arena = (char *)malloc (arena_size);
++      arena = NULL;
++      arena_size = __cxx_eh_arena_size_get();
++      if (arena_size > 0) {
++        arena = (char *)malloc (arena_size);
++      }
+       if (!arena)
+ 	{
+ 	  // If the allocation failed go without an emergency pool.

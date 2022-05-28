@@ -1,0 +1,23 @@
+From 7e9f27832c44b1a32c854f62dc7166f9292639c9 Mon Sep 17 00:00:00 2001
+From: Ivan Grokhotkov <ivan@espressif.com>
+Date: Fri, 10 Jul 2020 22:43:58 +0200
+Subject: [PATCH] riscv: correctly define ctz range
+
+---
+ gcc/config/riscv/riscv.h | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/gcc/config/riscv/riscv.h b/gcc/config/riscv/riscv.h
+index d17096e1dfa1..ec2f8813a5cc 100644
+--- a/gcc/config/riscv/riscv.h
++++ b/gcc/config/riscv/riscv.h
+@@ -710,6 +710,9 @@ typedef struct {
+    in the md file instead.  */
+ #define SHIFT_COUNT_TRUNCATED 0
+ 
++#define CLZ_DEFINED_VALUE_AT_ZERO(MODE, VALUE)  ((VALUE) = 32, 1)
++#define CTZ_DEFINED_VALUE_AT_ZERO(MODE, VALUE)  ((VALUE) = -1, 1)
++
+ /* Specify the machine mode that pointers have.
+    After generation of rtl, the compiler makes no further distinction
+    between pointers and any other objects of this machine mode.  */
