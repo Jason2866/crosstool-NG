@@ -1,0 +1,22 @@
+From 5d988071d4763a08e3637ab9e4e9962d8bc2f94f Mon Sep 17 00:00:00 2001
+From: Anton Maklakov <anton@espressif.com>
+Date: Thu, 30 Dec 2021 13:16:52 +0700
+Subject: [PATCH] xtensa: use psram-fix multilib for esp32 chip only
+
+---
+diff --git a/gcc/config.gcc b/gcc/config.gcc
+index 357b0bed0673..6c5468f52277 100644
+--- a/gcc/config.gcc
++++ b/gcc/config.gcc
+@@ -3564,6 +3564,11 @@ xstormy16-*-elf)
+ 	extra_options=stormy16/stormy16.opt
+ 	tmake_file="stormy16/t-stormy16"
+ 	;;
++xtensa*-esp32-elf*)
++	tm_file="${tm_file} dbxelf.h elfos.h newlib-stdint.h xtensa/elf.h"
++	tmake_file="${tmake_file} xtensa/t-xtensa-psram-fix"
++	extra_options="${extra_options} xtensa/elf.opt"
++	;;
+ xtensa*-*-elf*)
+ 	tm_file="${tm_file} dbxelf.h elfos.h newlib-stdint.h xtensa/elf.h"
+ 	extra_options="${extra_options} xtensa/elf.opt"
