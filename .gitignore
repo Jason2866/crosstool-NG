@@ -44,3 +44,6 @@ testing/docker/*/xtools
 .build-all/
 # .. and release creation
 release/
+builds/*
+.DS_Store
+configure~

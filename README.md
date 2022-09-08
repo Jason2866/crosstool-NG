@@ -1,4 +1,42 @@
-# Crosstool-NG
+## Crosstool-NG
+
+# [![GitHub Releases](https://img.shields.io/github/downloads/Jason2866/crosstool-NG/total?label=downloads&color=%231FA3EC&style=for-the-badge)](https://github.com/Jason2866/crosstool-NG/releases/latest) ESP32 toolchains Apple Silicon build
+Follow espressif's [instructions](https://docs.espressif.com/projects/esp-idf/en/release-v4.4/esp32/get-started/macos-setup-scratch.html#install-prerequisites) for installing needed homebrew items.
+
+
+Clone my repo:
+```
+git clone --recursive https://github.com/Jason2866/crosstool-NG
+cd crosstool-NG
+```
+
+
+Needed for building cross-tool (install binutils and ncurses via homebrew)
+```
+export PATH="$PATH:/opt/homebrew/opt/binutils/bin"
+export LDFLAGS="-L/opt/homebrew/opt/ncurses/lib -L/opt/homebrew/opt/gettext/lib"
+export CPPFLAGS="-I/opt/homebrew/opt/ncurses/include -I/opt/homebrew/opt/gettext/include"
+export PKG_CONFIG_PATH="/opt/homebrew/opt/ncurses/lib/pkgconfig"
+```
+
+Build crosstool-ng:
+```
+./bootstrap
+./configure --enable-local
+make
+```
+
+Configure for xtensa ESP32
+```
+./ct-ng xtensa-esp32-elf
+```
+
+Build, should take about 20 minutes
+```
+./ct-ng build
+```
+
+for S2, S3 and C3 repeat the steps after *Configure* accordingly. If it works, great! If not, you walk alone...
 
 ## Introduction
 
@@ -119,7 +157,7 @@ git push origin fix_comment_typo
 ```
 
 At this point the PR will be updated to have the latest commit to that branch, and can be subsequently reviewed.
- 
+
  2. Interactively rebase the offending commit(s) to fix the code review. This option is slightly annoying on Github, as the comments are stored with the commits, and are hidden when new commits replace the old commits. They used to disappear completely; now Github shows a grey 'View outdated' link next to the old commits.
 
 This recipe also comes handy with other issues, like your topic branch not being up-to-date with master:
