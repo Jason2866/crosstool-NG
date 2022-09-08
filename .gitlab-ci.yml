@@ -1,9 +1,13 @@
+include:
+  - template: 'Workflows/Branch-Pipelines.gitlab-ci.yml'
+
 stages:
   - build
-  - private_deploy
+  - internal_deploy
   - pre_test
   - test
   - dejagnu-test
+  - github_deploy
 
 image: ${CI_DOCKER_REGISTRY}/esp32-ci-env
 
@@ -11,11 +15,19 @@ variables:
   # GIT_STRATEGY - use option from "CI / CD Settings" - "General pipelines"
   GIT_SUBMODULE_STRATEGY: normal
 
-  ESP_COMPILER_TESTS_BRANCH: "esp-2022r1-branch"
+  # show artifact downloading progress
+  TRANSFER_METER_FREQUENCY: 5s
 
-  ARCHIVE_TOOL: "tar -cJvf" # 'v' we need to check the contents of the archive by log
+  # let's do not compress artifacts because we already use compressed archives
+  ARTIFACT_COMPRESSION_LEVEL: "fastest"
+
+  ESP_COMPILER_TESTS_BRANCH: "esp-2021r2-patch4-branch"
+
+  GCC_VER: "8.4.0"
+
+  ARCHIVE_TOOL: "tar -czvf" # 'v' we need to check the contents of the archive by log
   UNARCHIVE_TOOL: "tar -xf"
-  ARCHIVE_EXT: "tar.xz"
+  ARCHIVE_EXT: "tar.gz"
 
   DEJAGNU_IMAGE_TAG: 20210826-3
 
@@ -26,15 +38,22 @@ variables:
 .add_gitlab_key: &add_gitlab_key |
   cit_add_ssh_key "${GITLAB_KEY}"
 
+# ESPCI_HOMEBREW_PREFIX is set up in runner's config.toml
+.check_and_setup_homebrew: &check_and_setup_homebrew |
+  if [[ "$OSTYPE" == "darwin"* ]]; then
+    eval "$(${ESPCI_HOMEBREW_PREFIX}/bin/brew shellenv)"
+  fi
+
 before_script:
   - *use_ci_tools
   - *add_gitlab_key
+  - *check_and_setup_homebrew
 
 # Prepare release name/number
 .get_release_name: &get_release_name |
   # using annotated tags
   REL_NUM=$(git describe --abbrev=7)
-  REL_SFX="gcc11_2_0"
+  REL_SFX="gcc${GCC_VER//./_}"
   REL_NAME=${CONF_TARGET}-${REL_SFX}-${REL_NUM}-${PLATFORM_NAME}
   ARCHIVE_NAME=${REL_NAME}.${ARCHIVE_EXT}
   echo "PLATFORM_NAME: $PLATFORM_NAME"
@@ -49,12 +68,34 @@ before_script:
   make
   ./ct-ng ${CONF_TARGET}
 
+# HOMEBREW_PREFIX is an original variable from "brew shellenv"
+.build_ctng_macos_native: &build_ctng_macos_native |
+  (
+    PATH="${HOMEBREW_PREFIX}/opt/gnu-sed/libexec/gnubin:${PATH:-}";
+    PATH="${HOMEBREW_PREFIX}/opt/openssl@3/bin:${PATH:-}";
+    PATH="${HOMEBREW_PREFIX}/opt/binutils/bin:${PATH:-}";
+    PATH="${HOMEBREW_PREFIX}/opt/libtool/libexec/gnubin:${PATH:-}";
+    PATH="${HOMEBREW_PREFIX}/opt/ncurses/bin:${PATH:-}";
+    export PATH;
+    export LDFLAGS="-L${HOMEBREW_PREFIX}/opt/ncurses/lib ${LDFLAGS:-}";
+    export LDFLAGS="-L${HOMEBREW_PREFIX}/opt/gettext/lib ${LDFLAGS:-}";
+    export CPPFLAGS="-I${HOMEBREW_PREFIX}/opt/ncurses/include ${CPPFLAGS:-}";
+    export CPPFLAGS="-I${HOMEBREW_PREFIX}/opt/gettext/include ${CPPFLAGS:-}";
+
+    ./bootstrap;
+    ./configure --enable-local;
+    make;
+    ./ct-ng ${CONF_TARGET};
+  )
+
 # ct-ng options common for all platforms
 .configure_common: &configure_common |
   echo "# CT_LOG_PROGRESS_BAR is not set" >> .config
   echo "# CT_PREFIX_DIR_RO is not set" >> .config
   echo "CT_LOG_EXTRA=y" >> .config
   echo "CT_LOG_LEVEL_MAX=\"EXTRA\"" >> .config
+  echo "CT_LOG_TO_FILE=y" >> .config
+  echo "# CT_LOG_FILE_COMPRESS is not set" >> .config
   echo "CT_USE_MIRROR=y" >> .config
   echo "CT_FORCE_MIRROR=y" >> .config
   echo "CT_MIRROR_BASE_URL=\"${MIRROR_BASE}\"" >> .config
@@ -86,6 +127,12 @@ before_script:
 
   # No support Python in GDB in cross-compilation now,
   # see https://stackoverflow.com/questions/33512541/cross-compiling-gdb-for-arm-with-python-failed#34625177
+  # Espressif provides GDB 11+ with Python 3 support separately
+  echo "# CT_GDB_CROSS_PYTHON is not set" >> .config
+
+.configure_macos_native: &configure_macos_native |
+  # No old Python 2 on macOS anymore
+  # Espressif provides GDB 11+ with Python 3 support separately
   echo "# CT_GDB_CROSS_PYTHON is not set" >> .config
 
 .configure_win_crossbuild: &configure_win_crossbuild |
@@ -108,15 +155,14 @@ before_script:
 # Package the toolchain
 .package_toolchain: &package_toolchain |
   mkdir -p dist
-  pushd builds
-  rm -f ../build.log
-  mv ${CONF_TARGET}/build.log.bz2 ..
-  ${ARCHIVE_TOOL} ${ARCHIVE_NAME} ${CONF_TARGET}/ > tar-list.txt
+  cd builds
+  rm -fv ${CONF_TARGET}/build.log*
+  ${ARCHIVE_TOOL} ${ARCHIVE_NAME} ${CONF_TARGET}/ > tar-list.txt 2>&1
   mv tar-list.txt ..
   mv ${ARCHIVE_NAME} ../dist/
   echo "${ARCHIVE_NAME}" > ../dist/file_${PLATFORM_NAME}_${CONF_TARGET}
   ls -l ../dist/
-  popd
+  cd -
 
 # Common template for all builds
 .build_template:
@@ -133,8 +179,12 @@ before_script:
     expire_in: 6 weeks
   after_script:
     # save artifacts in any case (both failure or success)
-    - git add -f dist tar-list.txt build.log.bz2 .config
-    - git clean -d -x -f -f
+    - test -f .config && git add -f .config
+    - test -f build.log && bzip2 build.log
+    - test -f build.log.bz2 && git add -f build.log.bz2
+    - test -f tar-list.txt && git add -f tar-list.txt
+    - test -d dist && git add -f dist
+    - git clean -dxff >/dev/null
 
 .build_template_linux:
   extends: .build_template
@@ -237,6 +287,44 @@ esp32s3_macos:
 
 riscv32_esp_macos:
   extends: .template_macos_cross
+  variables:
+    CONF_TARGET: "riscv32-esp-elf"
+
+.template_macos_arm64_native:
+  extends: .build_template
+  tags: [ "darwin", "aarch64" ]
+  variables:
+    PLATFORM_NAME: "macos-arm64"
+    CONF_TARGET: "xtensa-esp32-elf"
+    # Although version >= 11 is required, there is some compile-time problem with such value
+    # so 10.8 value is used, it works correctly and creates binaries for minimal os version == 11.0
+    MACOSX_DEPLOYMENT_TARGET: "10.8"
+  script:
+    - *get_release_name
+    - *build_ctng_macos_native
+    - *configure_common
+    - *configure_macos_native
+    - *configure_docker
+    - *build_toolchain
+    - *package_toolchain
+
+esp32_macos_arm64:
+  extends: .template_macos_arm64_native
+  variables:
+    CONF_TARGET: "xtensa-esp32-elf"
+
+esp32s2_macos_arm64:
+  extends: .template_macos_arm64_native
+  variables:
+    CONF_TARGET: "xtensa-esp32s2-elf"
+
+esp32s3_macos_arm64:
+  extends: .template_macos_arm64_native
+  variables:
+    CONF_TARGET: "xtensa-esp32s3-elf"
+
+riscv32_esp_macos_arm64:
+  extends: .template_macos_arm64_native
   variables:
     CONF_TARGET: "riscv32-esp-elf"
 
@@ -425,12 +513,146 @@ riscv32_esp_lin_arm64:
     CONF_TARGET: "riscv32-esp-elf"
     CONF_HOST: "aarch64-linux-gnu"
 
+upload_to_internal:
+  stage: internal_deploy
+  image: $CI_DOCKER_REGISTRY/compiler-testsuite:2
+  when: manual
+  allow_failure: true
+  tags: [ "build", "amd64", "shiny" ]
+  variables:
+    # don't use "GIT_STRATEGY: none", because we need cleaning old artifacts in 'dist/' that came from previous pipelines
+    GIT_SUBMODULE_STRATEGY: none
+    CTNG_ESP_HELPERS_BRANCH: "-b master"
+    TARGETS: "xtensa-esp32-elf xtensa-esp32s2-elf xtensa-esp32s3-elf riscv32-esp-elf"
+    HOSTS: "linux-amd64 linux-arm64 linux-armel linux-armhf linux-i686 macos macos-arm64 win32 win64"
+  artifacts:
+    paths:
+      # a list just for check files, debug
+      - dist/src-tar-list.txt
+    reports:
+      dotenv: dist/dist.env
+  before_script:
+    - *use_ci_tools
+  script:
+    - cd dist
+    - DIST_VERSION=$(git describe --abbrev=7)
+    - echo "DIST_VERSION=$DIST_VERSION" >> dist.env
+    - RELEASE_CHECKSUM_FILE="${CI_PROJECT_NAME}-${DIST_VERSION}-checksum.sha256"
+    - RELEASE_SRC_NAME="${CI_PROJECT_NAME}-${DIST_VERSION}-src"
+    - RELEASE_SRC_FILE="${CI_PROJECT_NAME}-${DIST_VERSION}-src.${ARCHIVE_EXT}"
+    # Create a source archive
+    - rm -rf -- "${RELEASE_SRC_NAME}" "${RELEASE_SRC_FILE}"
+    - git clone --quiet --depth 1 --recurse-submodules --shallow-submodules ${CI_REPOSITORY_URL} "${RELEASE_SRC_NAME}"
+    - find "${RELEASE_SRC_NAME}" -name ".git" -type d -exec rm -rf -- "{}" +
+    - find "${RELEASE_SRC_NAME}" -name .git\* -exec rm -rf -- {} +
+    - ${ARCHIVE_TOOL} "${RELEASE_SRC_FILE}" "${RELEASE_SRC_NAME}" > src-tar-list.txt 2>&1
+    - rm -rf -- "${RELEASE_SRC_NAME}"
+    - ls -l
+    # Create a checksum file
+    - DIST_FILE_LIST=$(find . -name file_\* -exec cat {} \+)
+    - DIST_FILE_LIST="${DIST_FILE_LIST} ${RELEASE_SRC_FILE}"
+    - |
+      for n in $DIST_FILE_LIST; do
+        sz=$(stat -c%s "${n}") >> ${RELEASE_CHECKSUM_FILE};
+        printf "# %s: %s bytes\n" "${n}" "${sz}" >> ${RELEASE_CHECKSUM_FILE};
+        sha256sum -b "${n}" >> ${RELEASE_CHECKSUM_FILE};
+      done
+    - DIST_FILE_LIST="${DIST_FILE_LIST} ${RELEASE_CHECKSUM_FILE}"
+    # remove new lines from file list
+    - DIST_FILE_LIST="${DIST_FILE_LIST//$'\n'/ }"
+    - echo "DIST_FILE_LIST=$DIST_FILE_LIST" >> dist.env
+    # Upload all needed files
+    - HTTP_UPLOAD_DIR=${HTTP_UPLOAD_DIR}/${DIST_VERSION}
+    - HTTP_PUBLIC_DIR=${HTTP_PUBLIC_DIR}/${DIST_VERSION}
+    - cit_add_ssh_key "${HTTP_UPLOAD_KEY}"
+    - ssh ${HTTP_UPLOAD_DIR%:*} "mkdir -p ${HTTP_UPLOAD_DIR#*:}"
+    - scp ${DIST_FILE_LIST} ${HTTP_UPLOAD_DIR}
+    # Show download links
+    - DIST_URL_LIST=""
+    - for n in ${DIST_FILE_LIST}; do DIST_URL_LIST="${DIST_URL_LIST} ${HTTP_PUBLIC_DIR}/${n}"; done
+    - echo "DIST_URL_LIST=$DIST_URL_LIST" >> dist.env
+    - echo -e "\nArchives were published there:\n\n$(for n in ${DIST_FILE_LIST}; do echo "${HTTP_PUBLIC_DIR}/${n}"; done)\n"
+    # Show JSON snipppet
+    - cit_add_ssh_key "${GITLAB_KEY}"
+    - git clone -q --depth 1 ${CTNG_ESP_HELPERS_BRANCH} ${GITLAB_SSH_SERVER}/idf/ctng-esp-helpers.git
+    - ./ctng-esp-helpers/print_all_checksum_json.sh "${HTTP_PUBLIC_DIR}" "${TARGETS}" "${HOSTS}" 2>err.log
+    - echo ""
+    - cat err.log
+    # remove empty lines
+    - sed -i '/^[[:space:]]*$/d' dist.env
+    - cat dist.env
+
+upload_to_github:
+  stage: github_deploy
+  image: espressif/github-hub:2
+  needs: [ upload_to_internal ]
+  tags: [ "build", "amd64", "brew" ]
+  allow_failure: true
+  rules:
+    - if: $CI_COMMIT_TAG
+      when: manual
+  variables:
+    GIT_SUBMODULE_STRATEGY: none
+    DIST_URL_LIST: ${DIST_URL_LIST}
+    DIST_FILE_LIST: ${DIST_FILE_LIST}
+    GITHUB_USER: "${GH_USER}"
+    GITHUB_TOKEN: "${GH_TOKEN}"
+    TAG: ${CI_COMMIT_TAG}
+    REPO_URL: ${GH_REPO_URL}
+  before_script: []
+  script:
+    - echo hello
+    - echo $DIST_URL_LIST
+    # TMP dir
+    - rm -rf TMP && mkdir TMP && cd TMP
+    # download urls
+    - for u in ${DIST_URL_LIST}; do curl -O -sSL --connect-timeout 10 --retry 10 "${u}"; done
+    - ls -l
+    # hub release upload
+    - git remote remove github || true
+    - echo "${REPO_URL}"
+    - git remote add github ${REPO_URL}
+    - hub release
+    - hub release show ${TAG} || { echo "Please create a release on GitHub with ${TAG} tag at first"; exit 1; }
+    - for n in ${DIST_FILE_LIST}; do hub release edit -m "" -a "${n}" "${TAG}"; done
+    - cd -
+    - rm -rf TMP
+
+.update_idf_tools:
+  allow_failure: true
+  variables:
+    TOOL_NAME: "toolchain"
+    TOOL_MEMBERS: "xtensa-esp32-elf xtensa-esp32s2-elf xtensa-esp32s3-elf riscv32-esp-elf"
+    TOOL_VERSION: ${DIST_VERSION}-${GCC_VER}
+  trigger:
+    project: idf/idf-tools-updater
+    strategy: depend
+
+internal_update_idf_tools:
+  extends: .update_idf_tools
+  stage: internal_deploy
+  needs: [ upload_to_internal ]
+  when: manual
+  variables:
+    TOOL_SHA256_URL: ${HTTP_PUBLIC_DIR}/${DIST_VERSION}/crosstool-NG-${DIST_VERSION}-checksum.sha256
+
+github_update_idf_tools:
+  extends: .update_idf_tools
+  stage: github_deploy
+  # upload_to_internal - because this job depends (via .update_idf_tools) on DIST_VERSION from dist/dist.env
+  needs: [ upload_to_internal, upload_to_github ]
+  rules:
+    - if: $CI_COMMIT_TAG
+      when: manual
+  variables:
+    TOOL_SHA256_URL: ${GH_REPO_URL}/releases/download/${CI_COMMIT_TAG}/crosstool-NG-${CI_COMMIT_TAG}-checksum.sha256
+
 # We use prep_tests job to collect all test data and scripts in artifacts,
 # to avoid dependencies for git, because we run some tests on original images.
 prep_tests:
   stage: pre_test
   tags: [ "build", "amd64" ]
-  image: $CI_DOCKER_REGISTRY/compiler-testsuite:1
+  image: $CI_DOCKER_REGISTRY/compiler-testsuite:2
   needs: []
   variables:
     GIT_STRATEGY: none
@@ -442,108 +664,150 @@ prep_tests:
     expire_in: 6 weeks
   script:
     - test -n "${ESP_COMPILER_TESTS_BRANCH:-}" || exit 1
-    - git clone -q -b ${ESP_COMPILER_TESTS_BRANCH} "${GIT_SERVER}/idf/esp-compiler-tests.git"
+    - rm -rf "esp-compiler-tests" && git clone -q -b ${ESP_COMPILER_TESTS_BRANCH} "${GIT_SERVER}/idf/esp-compiler-tests.git"
     - cd esp-compiler-tests
     - git log -n10 --oneline
 
-.test_arm_rpi:
-  stage: test
-  image: $CI_DOCKER_REGISTRY/rpi-esp-idf-env:1
-  tags: [ "arm" ]
-  variables:
-    GIT_STRATEGY: none
-    PLATFORM_NAME: "linux-armel"
-    IDF_PATH: "${CI_PROJECT_DIR}/esp-idf"
-    ESP_IDF_BRANCH: "-b master"
-  after_script:
-    - rm -rf ${CI_PROJECT_DIR}/*
-  script:
-    - pwd; id; uname -a
-    - ARCHIVE_NAME=$(cat dist/file_${PLATFORM_NAME}_${CONF_TARGET})
-    - ${UNARCHIVE_TOOL} dist/${ARCHIVE_NAME}
-    - export PATH="${CI_PROJECT_DIR}/${CONF_TARGET}/bin:${PATH}"
-
-    - file ./${CONF_TARGET}/bin/${CONF_TARGET}-gcc
-    - ./${CONF_TARGET}/bin/${CONF_TARGET}-gcc -v
-
-    - rm -rf ${IDF_PATH}
-    - git clone -q --depth 1 ${ESP_IDF_BRANCH} ${GITLAB_SSH_SERVER}/idf/esp-idf ${IDF_PATH}
-    - cd ${IDF_PATH}
-    - git submodule update --init
-    - source add_path.sh
-    - cd ${IDF_PATH}/examples/get-started/hello_world
-    - idf.py build
-
-.esp32-rpi-test:
-  extends: .test_arm_rpi
-  dependencies:
-    - esp32_lin_armel
-  variables:
-    CONF_TARGET: "xtensa-esp32-elf"
-    IDF_TARGET: "esp32"
-
-.esp32s2-rpi-test:
-  extends: .test_arm_rpi
-  dependencies:
-    - esp32s2_lin_armel
-  variables:
-    CONF_TARGET: "xtensa-esp32s2-elf"
-    IDF_TARGET: "esp32s2beta"
+#
+# Compiler tests: build-only and just-run-tools
+#
 
 .template_compiler_tests:
   stage: test
-  tags: [ "build", "amd64" ]
-  image: $CI_DOCKER_REGISTRY/compiler-testsuite:1
   artifacts:
     when: always
     paths:
-      - esp-compiler-tests/*/*.log
-      - esp-compiler-tests/*/*.elf
+      - esp-compiler-tests/**/*.log
+      - esp-compiler-tests/**/*.elf
   variables:
     GIT_STRATEGY: none
-    PLATFORM_NAME: "linux-amd64"
   after_script:
     - source citools/import_functions
     - cit_rm ${CONF_TARGET}
   script:
     - ARCHIVE_NAME=$(cat dist/file_${PLATFORM_NAME}_${CONF_TARGET})
     - ${UNARCHIVE_TOOL} dist/${ARCHIVE_NAME}
-    - ./${CONF_TARGET}/bin/${CONF_TARGET}-gcc -v
     - export PATH="${CI_PROJECT_DIR}/${CONF_TARGET}/bin:${PATH}"
 
-    - test -n "${ESP_COMPILER_TESTS_BRANCH:-}" || exit 1
-    - git clone -q --depth 1 -b ${ESP_COMPILER_TESTS_BRANCH} ${GITLAB_SSH_SERVER}/idf/esp-compiler-tests.git
-    - cd esp-compiler-tests
-    - source ${CONF_TARGET}-profile
-    - ./run-all.sh
+    - echo ""
+    - echo "*** Build-only tests ****"
+    - echo ""
+    - |
+      (
+        cd esp-compiler-tests/build-only
+        source profile-${CONF_TARGET}
+        ./run-all.sh
+      )
+    - echo ""
+    - echo "*** Just-run-tools tests ****"
+    - echo ""
+    - |
+      (
+        cd esp-compiler-tests/just-run-tools
+        ./run.sh
+      )
 
-esp32-compiler-tests:
+# Linux amd64
+
+.template_lin_amd64_compiler_tests:
   extends: .template_compiler_tests
-  dependencies:
-    - esp32_lin_amd64
+  tags: [ "build", "amd64" ]
+  image: $CI_DOCKER_REGISTRY/compiler-testsuite:2
+  variables:
+    PLATFORM_NAME: "linux-amd64"
+
+esp32_lin_amd64_compiler_tests:
+  extends: .template_lin_amd64_compiler_tests
+  needs: [ esp32_lin_amd64, prep_tests ]
   variables:
     CONF_TARGET: "xtensa-esp32-elf"
 
-esp32s2-compiler-tests:
-  extends: .template_compiler_tests
-  dependencies:
-    - esp32s2_lin_amd64
+esp32s2_lin_amd64_compiler_tests:
+  extends: .template_lin_amd64_compiler_tests
+  needs: [ esp32s2_lin_amd64, prep_tests ]
   variables:
     CONF_TARGET: "xtensa-esp32s2-elf"
 
-esp32s3-compiler-tests:
-  extends: .template_compiler_tests
-  dependencies:
-    - esp32s3_lin_amd64
+esp32s3_lin_amd64_compiler_tests:
+  extends: .template_lin_amd64_compiler_tests
+  needs: [ esp32s3_lin_amd64, prep_tests ]
   variables:
     CONF_TARGET: "xtensa-esp32s3-elf"
 
-riscv32-compiler-tests:
-  extends: .template_compiler_tests
-  dependencies:
-    - riscv32_esp_lin_amd64
+riscv32_lin_amd64_compiler_tests:
+  extends: .template_lin_amd64_compiler_tests
+  needs: [ riscv32_esp_lin_amd64, prep_tests ]
   variables:
     CONF_TARGET: "riscv32-esp-elf"
+
+# macOS amd64
+
+.template_macos_amd64_compiler_tests:
+  extends: .template_compiler_tests
+  tags: [ "darwin", "amd64" ]
+  variables:
+    PLATFORM_NAME: "macos"
+
+esp32_macos_amd64_compiler_tests:
+  extends: .template_macos_amd64_compiler_tests
+  needs: [ esp32_macos, prep_tests ]
+  variables:
+    CONF_TARGET: "xtensa-esp32-elf"
+
+esp32s2_macos_amd64_compiler_tests:
+  extends: .template_macos_amd64_compiler_tests
+  needs: [ esp32s2_macos, prep_tests ]
+  variables:
+    CONF_TARGET: "xtensa-esp32s2-elf"
+
+esp32s3_macos_amd64_compiler_tests:
+  extends: .template_macos_amd64_compiler_tests
+  needs: [ esp32s3_macos, prep_tests ]
+  variables:
+    CONF_TARGET: "xtensa-esp32s3-elf"
+
+riscv32_macos_amd64_compiler_tests:
+  extends: .template_macos_amd64_compiler_tests
+  needs: [ riscv32_esp_macos, prep_tests ]
+  variables:
+    CONF_TARGET: "riscv32-esp-elf"
+
+# macos arm64
+
+.template_macos_aarch64_compiler_tests:
+  extends: .template_compiler_tests
+  tags: [ "darwin", "aarch64" ]
+  variables:
+    PLATFORM_NAME: "macos-arm64"
+
+esp32_macos_aarch64_compiler_tests:
+  extends: .template_macos_aarch64_compiler_tests
+  needs: [ esp32_macos_arm64, prep_tests ]
+  variables:
+    CONF_TARGET: "xtensa-esp32-elf"
+
+esp32s2_macos_aarch64_compiler_tests:
+  extends: .template_macos_aarch64_compiler_tests
+  needs: [ esp32s2_macos_arm64, prep_tests ]
+  variables:
+    CONF_TARGET: "xtensa-esp32s2-elf"
+
+esp32s3_macos_aarch64_compiler_tests:
+  extends: .template_macos_aarch64_compiler_tests
+  needs: [ esp32s3_macos_arm64, prep_tests ]
+  variables:
+    CONF_TARGET: "xtensa-esp32s3-elf"
+
+riscv32_macos_aarch64_compiler_tests:
+  extends: .template_macos_aarch64_compiler_tests
+  needs: [ riscv32_esp_macos_arm64, prep_tests ]
+  variables:
+    CONF_TARGET: "riscv32-esp-elf"
+
+
+#
+# "Just-run-tools" on Windows
+#
 
 .native_win64_tools_test_template:
   stage: test
@@ -558,128 +822,70 @@ riscv32-compiler-tests:
     - $ARCHIVE_NAME=$(cat "dist\file_${PLATFORM_NAME}_${CONF_TARGET}")
     - Expand-Archive -DestinationPATH . "dist\$ARCHIVE_NAME"
     - $env:PATH = "${CI_PROJECT_DIR}\${CONF_TARGET}\bin;" + $env:PATH
-    - Push-Location esp-compiler-tests\tools
+    - Push-Location esp-compiler-tests\just-run-tools
     - .\run.ps1
     - Pop-Location
 
-# tools test win64
+# win64
 
 native_win64_tools_test_esp32:
   extends: .native_win64_tools_test_template
-  needs:
-    - job: prep_tests
-      artifacts: true
-    - job: esp32_win64
-      artifacts: true
+  needs: [ esp32_win64, prep_tests ]
   variables:
     CONF_TARGET: "xtensa-esp32-elf"
 
 native_win64_tools_test_esp32s2:
   extends: .native_win64_tools_test_template
-  needs:
-    - job: prep_tests
-      artifacts: true
-    - job: esp32s2_win64
-      artifacts: true
+  needs: [ esp32s2_win64, prep_tests ]
   variables:
     CONF_TARGET: "xtensa-esp32s2-elf"
 
 native_win64_tools_test_esp32s3:
   extends: .native_win64_tools_test_template
-  needs:
-    - job: prep_tests
-      artifacts: true
-    - job: esp32s3_win64
-      artifacts: true
+  needs: [ esp32s3_win64, prep_tests ]
   variables:
     CONF_TARGET: "xtensa-esp32s3-elf"
 
 native_win64_tools_test_riscv32:
   extends: .native_win64_tools_test_template
-  needs:
-    - job: prep_tests
-      artifacts: true
-    - job: riscv32_esp_win64
-      artifacts: true
+  needs: [ riscv32_esp_win64, prep_tests ]
   variables:
     CONF_TARGET: "riscv32-esp-elf"
 
-# tools test win32
+# win32
 
 native_win32_tools_test_esp32:
   extends: .native_win64_tools_test_template
-  needs:
-    - job: prep_tests
-      artifacts: true
-    - job: esp32_win
-      artifacts: true
+  needs: [ esp32_win, prep_tests ]
   variables:
     CONF_TARGET: "xtensa-esp32-elf"
     PLATFORM_NAME: "win32"
 
 native_win32_tools_test_esp32s2:
   extends: .native_win64_tools_test_template
-  needs:
-    - job: prep_tests
-      artifacts: true
-    - job: esp32s2_win
-      artifacts: true
+  needs: [ esp32s2_win, prep_tests ]
   variables:
     CONF_TARGET: "xtensa-esp32s2-elf"
     PLATFORM_NAME: "win32"
 
 native_win32_tools_test_esp32s3:
   extends: .native_win64_tools_test_template
-  needs:
-    - job: prep_tests
-      artifacts: true
-    - job: esp32s3_win
-      artifacts: true
+  needs: [ esp32s3_win, prep_tests ]
   variables:
     CONF_TARGET: "xtensa-esp32s3-elf"
     PLATFORM_NAME: "win32"
 
 native_win32_tools_test_riscv32:
   extends: .native_win64_tools_test_template
-  needs:
-    - job: prep_tests
-      artifacts: true
-    - job: riscv32_esp_win
-      artifacts: true
+  needs: [ riscv32_esp_win, prep_tests ]
   variables:
     CONF_TARGET: "riscv32-esp-elf"
     PLATFORM_NAME: "win32"
 
-upload_to_http:
-  stage: private_deploy
-  when: manual
-  allow_failure: true
-  tags: [ "deploy", "shiny" ]
-  variables:
-    # force the fetch strategy to clean a working dir
-    GIT_STRATEGY: fetch
-    CTNG_ESP_HELPERS_BRANCH: "-b master"
-  before_script:
-    - *use_ci_tools
-  script:
-    - cit_add_ssh_key "${HTTP_UPLOAD_KEY}"
-    # List of archives in dist/
-    - FILES=$(find dist -name file_\* -exec cat {} \+)
-    - pushd dist
-    - scp ${FILES} ${HTTP_UPLOAD_DIR}
-    # Show download links
-    - echo -e "\nArchives were published there:\n\n$(for n in ${FILES}; do echo "${HTTP_PUBLIC_DIR}/${n}"; done)\n"
-    - popd
-    # Show checksums
-    - cit_add_ssh_key "${GITLAB_KEY}"
-    - git clone -q --depth 1 ${CTNG_ESP_HELPERS_BRANCH} ${GITLAB_SSH_SERVER}/idf/ctng-esp-helpers.git
-    - pushd dist
-    - ../ctng-esp-helpers/print_all_checksum_json.sh "${HTTP_PUBLIC_DIR}" "xtensa-esp32-elf xtensa-esp32s2-elf xtensa-esp32s3-elf riscv32-esp-elf" "linux-amd64 linux-arm64 linux-armel linux-armhf linux-i686 macos win32 win64" 2>err.log
-    - echo ""
-    - cat err.log
-    - popd
 
 include: '.gitlab/ci/dejagnu-test.yml'
+
+# Linux amd64
 
 # esp32 tests
 
@@ -753,3 +959,182 @@ test_gxx_riscv32_esp_lin_amd64:
   extends: .dejagnu-test-gxx-template
   needs: [ riscv32_esp_lin_amd64, prep_tests ]
 
+# macOS amd64
+
+# esp32 tests
+
+test_ld_esp32_macos:
+  extends: .dejagnu-test-ld-template
+  needs: [ esp32_macos, prep_tests ]
+  tags: [ "darwin", "amd64" ]
+
+test_gas_esp32_macos:
+  extends: .dejagnu-test-gas-template
+  needs: [ esp32_macos, prep_tests ]
+  tags: [ "darwin", "amd64" ]
+
+test_gcc_esp32_macos:
+  extends: .dejagnu-test-gcc-template
+  needs: [ esp32_macos, prep_tests ]
+  tags: [ "darwin", "amd64" ]
+
+test_gxx_esp32_macos:
+  extends: .dejagnu-test-gxx-template
+  needs: [ esp32_macos, prep_tests ]
+  tags: [ "darwin", "amd64" ]
+
+#esp32s2 tests
+
+test_ld_esp32s2_macos:
+  extends: .dejagnu-test-ld-template
+  needs: [ esp32s2_macos, prep_tests ]
+  tags: [ "darwin", "amd64" ]
+
+test_gas_esp32s2_macos:
+  extends: .dejagnu-test-gas-template
+  needs: [ esp32s2_macos, prep_tests ]
+  tags: [ "darwin", "amd64" ]
+
+test_gcc_esp32s2_macos:
+  extends: .dejagnu-test-gcc-template
+  needs: [ esp32s2_macos, prep_tests ]
+  tags: [ "darwin", "amd64" ]
+
+test_gxx_esp32s2_macos:
+  extends: .dejagnu-test-gxx-template
+  needs: [ esp32s2_macos, prep_tests ]
+  tags: [ "darwin", "amd64" ]
+
+#esp32s3 tests
+
+test_ld_esp32s3_macos:
+  extends: .dejagnu-test-ld-template
+  needs: [ esp32s3_macos, prep_tests ]
+  tags: [ "darwin", "amd64" ]
+
+test_gas_esp32s3_macos:
+  extends: .dejagnu-test-gas-template
+  needs: [ esp32s3_macos, prep_tests ]
+  tags: [ "darwin", "amd64" ]
+
+test_gcc_esp32s3_macos:
+  extends: .dejagnu-test-gcc-template
+  needs: [ esp32s3_macos, prep_tests ]
+  tags: [ "darwin", "amd64" ]
+
+test_gxx_esp32s3_macos:
+  extends: .dejagnu-test-gxx-template
+  needs: [ esp32s3_macos, prep_tests ]
+  tags: [ "darwin", "amd64" ]
+
+# riscv32 tests
+
+test_ld_riscv32_esp_macos:
+  extends: .dejagnu-test-ld-template
+  needs: [ riscv32_esp_macos, prep_tests ]
+  tags: [ "darwin", "amd64" ]
+
+test_gas_riscv32_esp_macos:
+  extends: .dejagnu-test-gas-template
+  needs: [ riscv32_esp_macos, prep_tests ]
+  tags: [ "darwin", "amd64" ]
+
+test_gcc_riscv32_esp_macos:
+  extends: .dejagnu-test-gcc-template
+  needs: [ riscv32_esp_macos, prep_tests ]
+  tags: [ "darwin", "amd64" ]
+
+test_gxx_riscv32_esp_macos:
+  extends: .dejagnu-test-gxx-template
+  needs: [ riscv32_esp_macos, prep_tests ]
+  tags: [ "darwin", "amd64" ]
+
+# macOS arm64
+
+# esp32 tests
+
+test_ld_esp32_macos_aarch64:
+  extends: .dejagnu-test-ld-template
+  needs: [ esp32_macos, prep_tests ]
+  tags: [ "darwin", "aarch64" ]
+
+test_gas_esp32_macos_aarch64:
+  extends: .dejagnu-test-gas-template
+  needs: [ esp32_macos, prep_tests ]
+  tags: [ "darwin", "aarch64" ]
+
+test_gcc_esp32_macos_aarch64:
+  extends: .dejagnu-test-gcc-template
+  needs: [ esp32_macos, prep_tests ]
+  tags: [ "darwin", "aarch64" ]
+
+test_gxx_esp32_macos_aarch64:
+  extends: .dejagnu-test-gxx-template
+  needs: [ esp32_macos, prep_tests ]
+  tags: [ "darwin", "aarch64" ]
+
+#esp32s2 tests
+
+test_ld_esp32s2_macos_aarch64:
+  extends: .dejagnu-test-ld-template
+  needs: [ esp32s2_macos, prep_tests ]
+  tags: [ "darwin", "aarch64" ]
+
+test_gas_esp32s2_macos_aarch64:
+  extends: .dejagnu-test-gas-template
+  needs: [ esp32s2_macos, prep_tests ]
+  tags: [ "darwin", "aarch64" ]
+
+test_gcc_esp32s2_macos_aarch64:
+  extends: .dejagnu-test-gcc-template
+  needs: [ esp32s2_macos, prep_tests ]
+  tags: [ "darwin", "aarch64" ]
+
+test_gxx_esp32s2_macos_aarch64:
+  extends: .dejagnu-test-gxx-template
+  needs: [ esp32s2_macos, prep_tests ]
+  tags: [ "darwin", "aarch64" ]
+
+#esp32s3 tests
+
+test_ld_esp32s3_macos_aarch64:
+  extends: .dejagnu-test-ld-template
+  needs: [ esp32s3_macos, prep_tests ]
+  tags: [ "darwin", "aarch64" ]
+
+test_gas_esp32s3_macos_aarch64:
+  extends: .dejagnu-test-gas-template
+  needs: [ esp32s3_macos, prep_tests ]
+  tags: [ "darwin", "aarch64" ]
+
+test_gcc_esp32s3_macos_aarch64:
+  extends: .dejagnu-test-gcc-template
+  needs: [ esp32s3_macos, prep_tests ]
+  tags: [ "darwin", "aarch64" ]
+
+test_gxx_esp32s3_macos_aarch64:
+  extends: .dejagnu-test-gxx-template
+  needs: [ esp32s3_macos, prep_tests ]
+  tags: [ "darwin", "aarch64" ]
+
+# riscv32 tests
+
+test_ld_riscv32_esp_macos_aarch64:
+  extends: .dejagnu-test-ld-template
+  needs: [ riscv32_esp_macos, prep_tests ]
+  tags: [ "darwin", "aarch64" ]
+
+test_gas_riscv32_esp_macos_aarch64:
+  extends: .dejagnu-test-gas-template
+  needs: [ riscv32_esp_macos, prep_tests ]
+  tags: [ "darwin", "aarch64" ]
+
+test_gcc_riscv32_esp_macos_aarch64:
+  extends: .dejagnu-test-gcc-template
+  needs: [ riscv32_esp_macos, prep_tests ]
+  tags: [ "darwin", "aarch64" ]
+
+test_gxx_riscv32_esp_macos_aarch64:
+  extends: .dejagnu-test-gxx-template
+  needs: [ riscv32_esp_macos, prep_tests ]
+  tags: [ "darwin", "aarch64" ]
