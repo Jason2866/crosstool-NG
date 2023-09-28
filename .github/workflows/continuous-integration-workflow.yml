@@ -20,7 +20,7 @@ jobs:
       - name: "prereq macOS"
         if: ${{ runner.os == 'macOS' }}
         run: |
-          brew install autoconf automake bash binutils gawk gnu-sed \
+          brew install python3 autoconf automake bash binutils gawk gnu-sed \
                gnu-tar help2man make ncurses
       - name: "build ct-ng"
         run: |
