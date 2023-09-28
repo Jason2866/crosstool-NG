@@ -1,5 +1,6 @@
 # Generated files
 configure
+configure~
 autom4te.cache
 aclocal.m4
 config.h*
@@ -19,6 +20,7 @@ config/versions/
 include/
 verbatim-data.mk
 maintainer/package-versions
+xtensa-dynconfig/xtensa*
 
 # Compressed files
 *.tar*
@@ -40,6 +42,7 @@ testing/docker/*/xtools
 
 # This is the place where toolchains are built
 .build/
+builds/
 # .. and log for 'build-all'
 .build-all/
 # .. and release creation

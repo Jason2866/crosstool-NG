@@ -9,10 +9,10 @@ jobs:
     runs-on: ${{ matrix.host }}
     strategy:
       matrix:
-        host: [ "ubuntu-latest", "macos-10.15" ]
+        host: [ "ubuntu-latest", "macos-11" ]
     steps:
       - name: "clone"
-        uses: actions/checkout@v2
+        uses: actions/checkout@v4
       - name: "prereq Linux"
         if: ${{ runner.os == 'Linux' }}
         run: |
