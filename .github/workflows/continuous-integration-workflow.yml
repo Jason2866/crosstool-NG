@@ -9,10 +9,10 @@ jobs:
     runs-on: ${{ matrix.host }}
     strategy:
       matrix:
-        host: [ "ubuntu-latest", "macos-10.15" ]
+        host: [ "ubuntu-latest", "macos-11" ]
     steps:
       - name: "clone"
-        uses: actions/checkout@v2
+        uses: actions/checkout@v4
       - name: "prereq Linux"
         if: ${{ runner.os == 'Linux' }}
         run: |
@@ -20,7 +20,7 @@ jobs:
       - name: "prereq macOS"
         if: ${{ runner.os == 'macOS' }}
         run: |
-          brew install autoconf automake bash binutils gawk gnu-sed \
+          brew install python3 autoconf automake bash binutils gawk gnu-sed \
                gnu-tar help2man make ncurses
       - name: "build ct-ng"
         run: |
@@ -35,12 +35,12 @@ jobs:
           make install
           tar -cf ct-ng.tar .local/
       - name: "upload ct-ng"
-        uses: actions/upload-artifact@v2
+        uses: actions/upload-artifact@v3
         with:
           name: crosstool.${{ matrix.host }}
           path: ct-ng.tar
       - name: "upload config.log"
-        uses: actions/upload-artifact@v2
+        uses: actions/upload-artifact@v3
         with:
           name: config.log.${{ matrix.host }}
           path: config.log
@@ -54,7 +54,7 @@ jobs:
         host: [ "ubuntu-latest" ]
     steps:
       - name: "download ct-ng"
-        uses: actions/download-artifact@v2
+        uses: actions/download-artifact@v3
         with:
           name: crosstool.${{ matrix.host }}
       - name: "extract ct-ng"
@@ -82,7 +82,7 @@ jobs:
           done
           tar -cvf src.tar src
       - name: "upload sources"
-        uses: actions/upload-artifact@v2
+        uses: actions/upload-artifact@v3
         with:
           name: src.tar
           path: src.tar
